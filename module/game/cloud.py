@@ -229,6 +229,12 @@ class CloudGameController(GameControllerBase):
             f"--app={self.GAME_URL}",   # 以应用模式启动
             "--disable-blink-features=AutomationControlled",  # 去除自动化痕迹，防止被人机验证
             f"--remote-debugging-port={self.cfg.browser_debug_port}",   # 调试端口，可用于复用浏览器
+            "--disable-extensions",
+            "--disable-gpu",
+            "--disable-dev-shm-usage",
+            "--no-sandbox",
+            '--js-flags="--max-old-space-size=512"',
+            "--disable-features=Translate,BackForwardCache,CalculateNativeWinOcclusion,SidePanel,TabGroups,Prerender2,PrivacySandboxSettings4,OptimizationHints"
         ]
         if self.cfg.browser_persistent_enable:
             args += [
