@@ -113,6 +113,9 @@ class CloudGameController(GameControllerBase):
         self.cfg = cfg
         self.logger = logger
 
+        self._qr_generate_count = 0
+        self._qr_generate_max_count = 5
+
         # 二维码登录通知限流（避免夜间定时任务反复刷屏）
         self._qr_notify_sent_count = 0
         self._qr_notify_max_count = 3
@@ -229,6 +232,12 @@ class CloudGameController(GameControllerBase):
             f"--app={self.GAME_URL}",   # 以应用模式启动
             "--disable-blink-features=AutomationControlled",  # 去除自动化痕迹，防止被人机验证
             f"--remote-debugging-port={self.cfg.browser_debug_port}",   # 调试端口，可用于复用浏览器
+            "--disable-extensions",
+            "--disable-gpu",
+            "--disable-dev-shm-usage",
+            "--no-sandbox",
+            '--js-flags="--max-old-space-size=512"',
+            "--disable-features=Translate,BackForwardCache,CalculateNativeWinOcclusion,SidePanel,TabGroups,Prerender2,PrivacySandboxSettings4,OptimizationHints"
         ]
         if self.cfg.browser_persistent_enable:
             args += [
@@ -879,7 +888,9 @@ class CloudGameController(GameControllerBase):
     def _wait_scan_success_with_refresh(self, qr_filename: str) -> None:
         import os
         check_interval = 2
-        while True:
+        while self._qr_generate_count < self._qr_generate_max_count:
+            self._qr_generate_count += 1
+
             # 成功
             if self.driver.find_elements(By.XPATH, "//*[contains(text(), '扫码成功')]"):
                 try:
@@ -921,8 +932,11 @@ class CloudGameController(GameControllerBase):
                     break
 
             time.sleep(check_interval)
+        else:
+            # 超过最大刷新次数仍未扫码成功
+            raise TimeoutException("等待扫码超时，二维码已刷新多次但未检测到扫码成功")
 
-    def _run_qr_login_flow(self) -> None:
+    def _run_qr_login_flow(self) -> bool:
         self.log_info("正在切换到二维码登录...")
 
         # 每次进入二维码登录流程时重置通知限流状态
@@ -945,6 +959,7 @@ class CloudGameController(GameControllerBase):
             self.log_info("=" * 60)
             self.log_info("等待扫码（二维码过期将自动刷新）...")
             self._wait_scan_success_with_refresh(qr_filename)
+            return True
         except TimeoutException:
             self.log_warning("等待二维码加载超时")
         except Exception as e:
@@ -961,6 +976,7 @@ class CloudGameController(GameControllerBase):
                 self.log_info("已切换回主文档")
             except Exception as switch_err:
                 self.log_warning(f"切回主文档失败: {switch_err}")
+        return False
 
     def start_game_process(self, headless=None) -> bool:
         """启动浏览器进程"""
@@ -992,7 +1008,9 @@ class CloudGameController(GameControllerBase):
 
                 # 如果是 headless 且配置了不重启，则尝试二维码登录
                 if self.cfg.browser_headless_enable and (not self.cfg.browser_headless_restart_on_not_logged_in):
-                    self._run_qr_login_flow()
+                    if not self._run_qr_login_flow():
+                        self.log_error("二维码登录流程失败，无法继续")
+                        return False
 
                 self.log_info("请在浏览器中完成登录操作")
 

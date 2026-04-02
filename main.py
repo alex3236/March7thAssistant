@@ -194,6 +194,9 @@ def run_notify_action():
 def main(action=None):
     first_run()
 
+    if os.environ.get("NO_FIRST_RUN", ""):
+        game.stop(True)
+
     # 完整运行
     if action is None or action == "main":
         run_main_actions()

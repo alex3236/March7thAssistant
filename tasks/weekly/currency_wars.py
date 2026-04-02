@@ -277,7 +277,10 @@ class CurrencyWars:
             if pos is None:
                 log.error("未找到难度选择按钮，无法选择关卡难度")
                 return False
-            auto.click_element_with_pos(pos, cnt=10)
+            auto.click_element_with_pos(pos, offset=(0, -100))
+            auto.mouse_scroll(50)
+            time.sleep(3) # 等待界面滚动
+            # auto.click_element_with_pos(pos, cnt=10)
         log.error(f"选择敌人难度为1的关卡失败")
         return False
 
