@@ -61,6 +61,7 @@ args = parse_args()
 
 import atexit
 import base64
+import threading
 
 if sys.platform == 'win32':
     import pyuac
@@ -103,21 +104,44 @@ def first_run():
         sys.exit(0)
 
 
+def _start_cloud_game_timeout(stop_game_func):
+    """Start a timer that terminates the cloud game run when the configured max run time is exceeded."""
+    max_run_time = cfg.get_value("cloud_game_max_run_time", 0)
+    if not cfg.cloud_game_enable or not max_run_time or int(max_run_time) <= 0:
+        return None
+
+    def _on_timeout():
+        error_msg = f"云游戏运行超时（超过 {max_run_time} 分钟），已强制停止"
+        log.error(error_msg)
+        notif.notify(content=error_msg, level=NotificationLevel.ERROR)
+        stop_game_func()
+
+    timer = threading.Timer(int(max_run_time) * 60, _on_timeout)
+    timer.daemon = True
+    timer.start()
+    return timer
+
+
 def run_main_actions():
     while True:
         if cfg.notify_merge:
             notif.start_batch()
         version.start()
         game.start()
+        timer = _start_cloud_game_timeout(lambda: game.stop(True))
         reward.start_specific("dispatch")
         Daily.start()
         reward.start()
+        if timer is not None:
+            timer.cancel()
         game.stop(True)
 
 
 def run_sub_task(action):
     if action != "currencywarstemp" and action != "divergenttemp":
         game.start()
+
+    timer = _start_cloud_game_timeout(lambda: game.stop(False))
 
     def currencywars(mode=None):
         war = CurrencyWars()
@@ -158,6 +182,8 @@ def run_sub_task(action):
     task = sub_tasks.get(action)
     if task:
         task()
+    if timer is not None:
+        timer.cancel()
     game.stop(False)
 
 

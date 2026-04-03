@@ -704,6 +704,13 @@ class SettingInterface(ScrollArea):
             tr("最大排队等待时间（分钟）"),
             ''
         )
+        self.cloudGameMaxRunTimeCard = RangeSettingCard1(
+            "cloud_game_max_run_time",
+            [0, 480],
+            FIF.STOP_WATCH,
+            tr("最大运行时间（分钟）"),
+            tr("超过此时间后将强制停止任务并推送通知，0 为不限制")
+        )
         # self.cloudGameVideoQualityCard = ComboBoxSettingCard2(
         #     "cloud_game_video_quality",
         #     FIF.VIDEO,
@@ -1467,6 +1474,7 @@ class SettingInterface(ScrollArea):
         self.CloudGameGroup.addSettingCard(self.browserHeadlessCard)
         self.browserHeadlessCard.addSettingCards([self.browserHeadlessRestartCard])
         self.CloudGameGroup.addSettingCard(self.cloudGameMaxQueueTimeCard)
+        self.CloudGameGroup.addSettingCard(self.cloudGameMaxRunTimeCard)
         # self.CloudGameGroup.addSettingCard(self.cloudGameVideoQualityCard)
         # self.CloudGameGroup.addSettingCard(self.cloudGameSmoothFirstCard)
         # self.CloudGameGroup.addSettingCard(self.cloudGameShowStatusCard)
