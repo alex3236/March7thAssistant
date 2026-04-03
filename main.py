@@ -119,7 +119,10 @@ def run_main_actions():
             p.join(timeout=cloud_max_run_time * 60)
             if p.is_alive():
                 p.terminate()
-                p.join()
+                p.join(timeout=10)
+                if p.is_alive():
+                    p.kill()
+                    p.join()
                 timeout_msg = cfg.notify_template['CloudGameTimeout'].format(time=cloud_max_run_time)
                 log.error(timeout_msg)
                 notif.flush_batch()
