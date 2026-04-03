@@ -61,6 +61,7 @@ args = parse_args()
 
 import atexit
 import base64
+import multiprocessing
 
 if sys.platform == 'win32':
     import pyuac
@@ -109,9 +110,25 @@ def run_main_actions():
             notif.start_batch()
         version.start()
         game.start()
-        reward.start_specific("dispatch")
-        Daily.start()
-        reward.start()
+
+        cloud_max_run_time = int(cfg.get_value("cloud_game_max_run_time", 0))
+        if cfg.cloud_game_enable and cloud_max_run_time > 0:
+            from utils.cloud_task_runner import run_cloud_tasks
+            p = multiprocessing.Process(target=run_cloud_tasks)
+            p.start()
+            p.join(timeout=cloud_max_run_time * 60)
+            if p.is_alive():
+                p.terminate()
+                p.join()
+                timeout_msg = cfg.notify_template['CloudGameTimeout'].format(time=cloud_max_run_time)
+                log.error(timeout_msg)
+                notif.flush_batch()
+                notif.notify(content=timeout_msg, level=NotificationLevel.ERROR)
+        else:
+            reward.start_specific("dispatch")
+            Daily.start()
+            reward.start()
+
         game.stop(True)
 
 
@@ -235,6 +252,7 @@ def exit_handler():
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     try:
         atexit.register(exit_handler)
         main(args.task) if args.task else main()
