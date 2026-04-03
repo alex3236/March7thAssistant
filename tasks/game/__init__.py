@@ -33,13 +33,13 @@ def wait_until(condition, timeout, period=1):
     return False
 
 
-def start():
+def start(on_cloud_game_entered=None):
     log.hr("开始运行", 0)
-    start_game()
+    start_game(on_cloud_game_entered=on_cloud_game_entered)
     log.hr("完成", 2)
 
 
-def start_game():
+def start_game(on_cloud_game_entered=None):
     MAX_RETRY = 3
 
     def check_and_click_enter():
@@ -175,10 +175,15 @@ def start_game():
         if not cloud_game.is_in_game():
             if not cloud_game.enter_cloud_game():
                 raise Exception("进入云游戏失败")
+            if on_cloud_game_entered:
+                on_cloud_game_entered()
             # time.sleep(10)    #dont need to wait
             if not wait_until(lambda: cloud_game_check_and_enter(), cfg.start_game_timeout * 60):
                 raise TimeoutError("查找并点击进入按钮超时")
             time.sleep(10)
+        else:
+            if on_cloud_game_entered:
+                on_cloud_game_entered()
 
     for retry in range(MAX_RETRY):
         try:

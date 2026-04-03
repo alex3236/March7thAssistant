@@ -127,24 +127,31 @@ def run_main_actions():
         if cfg.notify_merge:
             notif.start_batch()
         version.start()
-        game.start()
-        timer = _start_cloud_game_timeout(lambda: game.stop(True))
+        timer = [None]
+
+        def _on_entered_main():
+            timer[0] = _start_cloud_game_timeout(lambda: game.stop(True))
+
+        game.start(on_cloud_game_entered=_on_entered_main)
         try:
             reward.start_specific("dispatch")
             Daily.start()
             reward.start()
         finally:
-            if timer is not None:
-                timer.cancel()
+            if timer[0] is not None:
+                timer[0].cancel()
         game.stop(True)
 
 
 def run_sub_task(action):
     game_started = action != "currencywarstemp" and action != "divergenttemp"
-    if game_started:
-        game.start()
+    timer = [None]
 
-    timer = _start_cloud_game_timeout(lambda: game.stop(False)) if game_started else None
+    def _on_entered_sub():
+        timer[0] = _start_cloud_game_timeout(lambda: game.stop(False))
+
+    if game_started:
+        game.start(on_cloud_game_entered=_on_entered_sub)
 
     def currencywars(mode=None):
         war = CurrencyWars()
@@ -187,8 +194,8 @@ def run_sub_task(action):
         if task:
             task()
     finally:
-        if timer is not None:
-            timer.cancel()
+        if timer[0] is not None:
+            timer[0].cancel()
     game.stop(False)
 
 
