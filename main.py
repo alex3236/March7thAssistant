@@ -129,19 +129,22 @@ def run_main_actions():
         version.start()
         game.start()
         timer = _start_cloud_game_timeout(lambda: game.stop(True))
-        reward.start_specific("dispatch")
-        Daily.start()
-        reward.start()
-        if timer is not None:
-            timer.cancel()
+        try:
+            reward.start_specific("dispatch")
+            Daily.start()
+            reward.start()
+        finally:
+            if timer is not None:
+                timer.cancel()
         game.stop(True)
 
 
 def run_sub_task(action):
-    if action != "currencywarstemp" and action != "divergenttemp":
+    game_started = action != "currencywarstemp" and action != "divergenttemp"
+    if game_started:
         game.start()
 
-    timer = _start_cloud_game_timeout(lambda: game.stop(False))
+    timer = _start_cloud_game_timeout(lambda: game.stop(False)) if game_started else None
 
     def currencywars(mode=None):
         war = CurrencyWars()
@@ -180,10 +183,12 @@ def run_sub_task(action):
         "redemption": Redemption.start
     }
     task = sub_tasks.get(action)
-    if task:
-        task()
-    if timer is not None:
-        timer.cancel()
+    try:
+        if task:
+            task()
+    finally:
+        if timer is not None:
+            timer.cancel()
     game.stop(False)
 
 
