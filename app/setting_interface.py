@@ -402,6 +402,12 @@ class SettingInterface(ScrollArea):
             tr("在领取积分奖励后自动执行位面饰品快速提取消耗深度沉浸器"),
             "currencywars_bonus_enable"
         )
+        self.currencywarsFastModeCard = SwitchSettingCard1(
+            FIF.SPEED_HIGH,
+            tr('启用速通模式'),
+            tr("开启后，仅在首领节点尝试装备武器"),
+            "currencywars_fast_mode"
+        )
 
         self.UniverseGroup = SettingCardGroup(tr("差分宇宙"), self.scrollWidget)
         self.weeklyDivergentEnableCard = ExpandableSwitchSettingCard(
@@ -886,6 +892,13 @@ class SettingInterface(ScrollArea):
             tr('选择关闭窗口时的默认行为，也可以在关闭时由对话框询问'),
             texts={tr('询问'): 'ask', tr('最小化到托盘'): 'minimize', tr('关闭程序'): 'close'}
         )
+        self.windowMemoryCard = ComboBoxSettingCard2(
+            "window_memory",
+            FIF.LAYOUT,
+            tr('窗口记忆'),
+            tr('选择启动时恢复的窗口状态'),
+            texts={tr('记忆窗口大小'): 'size', tr('记忆窗口位置'): 'position', tr('记忆窗口大小和位置'): 'size_and_position', tr('都不记忆'): 'none'}
+        )
 
         self.NotifyGroup = SettingCardGroup(tr("消息推送"), self.scrollWidget)
         self.notifyMasterEnableCard = ExpandableSwitchSettingCard(
@@ -1256,18 +1269,24 @@ class SettingInterface(ScrollArea):
             tr('项目主页'),
             "https://github.com/moesnow/March7thAssistant"
         )
+        self.bilibiliCard = PrimaryPushSettingCard(
+            tr('立即前往'),
+            FIF.MOVIE,
+            tr('哔哩哔哩'),
+            tr('欢迎关注我们的B站账号，获取最新动态和教程')
+        )
         self.qqGroupCard = PrimaryPushSettingCard(
             tr('加入群聊'),
             FIF.EXPRESSIVE_INPUT_ENTRY,
             tr('QQ群'),
             ""
         )
-        self.feedbackCard = PrimaryPushSettingCard(
-            tr('提供反馈'),
-            FIF.FEEDBACK,
-            tr('提供反馈'),
-            tr('帮助我们改进 March7thAssistant')
-        )
+        # self.feedbackCard = PrimaryPushSettingCard(
+        #     tr('提供反馈'),
+        #     FIF.FEEDBACK,
+        #     tr('提供反馈'),
+        #     tr('帮助我们改进 March7thAssistant')
+        # )
         self.aboutCard = PrimaryPushSettingCard(
             tr('检查更新'),
             FIF.INFO,
@@ -1396,6 +1415,7 @@ class SettingInterface(ScrollArea):
         ])
         self.CurrencywarsGroup.addSettingCard(self.currencywarsTypeCard)
         self.CurrencywarsGroup.addSettingCard(self.currencywarsBonusEnableCard)
+        self.CurrencywarsGroup.addSettingCard(self.currencywarsFastModeCard)
 
         self.UniverseGroup.addSettingCard(self.weeklyDivergentEnableCard)
         self.weeklyDivergentEnableCard.addSettingCards([
@@ -1496,6 +1516,7 @@ class SettingInterface(ScrollArea):
         ])
         self.ProgramGroup.addSettingCard(self.playAudioCard)
         self.ProgramGroup.addSettingCard(self.closeWindowActionCard)
+        self.ProgramGroup.addSettingCard(self.windowMemoryCard)
 
         self.NotifyGroup.addSettingCard(self.notifyMasterEnableCard)
         self.notifyMasterEnableCard.addSettingCards([
@@ -1518,8 +1539,9 @@ class SettingInterface(ScrollArea):
         self.MiscGroup.addSettingCard(self.hotkeyCard)
 
         self.AboutGroup.addSettingCard(self.githubCard)
+        self.AboutGroup.addSettingCard(self.bilibiliCard)
         self.AboutGroup.addSettingCard(self.qqGroupCard)
-        self.AboutGroup.addSettingCard(self.feedbackCard)
+        # self.AboutGroup.addSettingCard(self.feedbackCard)
         self.AboutGroup.addSettingCard(self.aboutCard)
         self.AboutGroup.addSettingCard(self.updateSourceCard)
         self.updateSourceCard.addSettingCards([
@@ -1586,7 +1608,8 @@ class SettingInterface(ScrollArea):
 
         self.githubCard.clicked.connect(self.__openUrl("https://github.com/moesnow/March7thAssistant"))
         self.qqGroupCard.clicked.connect(self.__openUrl("https://qm.qq.com/q/C3IryUWCQw"))
-        self.feedbackCard.clicked.connect(self.__openUrl("https://github.com/moesnow/March7thAssistant/issues"))
+        # self.feedbackCard.clicked.connect(self.__openUrl("https://github.com/moesnow/March7thAssistant/issues"))
+        self.bilibiliCard.clicked.connect(self.__openUrl("https://space.bilibili.com/3706960664857075"))
 
         self.aboutCard.clicked.connect(lambda: checkUpdate(self.parent))
 
