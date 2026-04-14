@@ -1,6 +1,6 @@
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QUrl, QObject, QEvent, QPoint
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QWidget, QLabel, QFileDialog, QVBoxLayout, QStackedWidget, QSpacerItem, QScroller, QScrollerProperties
+from PySide6.QtWidgets import QWidget, QLabel, QFileDialog, QVBoxLayout, QStackedWidget, QSpacerItem, QScroller, QScrollerProperties, QScrollArea, QFrame, QApplication
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import SettingCardGroup, PushSettingCard, ScrollArea, InfoBar, PrimaryPushSettingCard
 from app.sub_interfaces.accounts_interface import accounts_interface
@@ -10,10 +10,11 @@ from .card.comboboxsettingcard1 import ComboBoxSettingCard1
 from .card.comboboxsettingcard2 import ComboBoxSettingCard2, ComboBoxSettingCardUpdateSource, ComboBoxSettingCardLog, ComboBoxSettingCardLanguage
 from .card.switchsettingcard1 import SwitchSettingCard1, StartMarch7thAssistantSwitchSettingCard, SwitchSettingCardTeam, SwitchSettingCardImmersifier, SwitchSettingCardGardenofplenty, SwitchSettingCardEchoofwar, SwitchSettingCardHotkey, SwitchSettingCardCloudGameStatus
 from .card.rangesettingcard1 import RangeSettingCard1
-from .card.pushsettingcard1 import CustomPushSettingCard, PushSettingCardInstance, PushSettingCardInstanceChallengeCount, PushSettingCardNotifyTemplate, PushSettingCardMirrorchyan, PushSettingCardEval, PushSettingCardDate, PushSettingCardKey, PushSettingCardTeam, PushSettingCardFriends, PushSettingCardTeamWithSwap, PushSettingCardPowerPlan, InstanceTeamSettingCard
+from .card.pushsettingcard1 import CustomPushSettingCard, PushSettingCardInstance, PushSettingCardInstanceChallengeCount, PushSettingCardNotifyTemplate, PushSettingCardMirrorchyan, PushSettingCardStr, PushSettingCardEval, PushSettingCardDate, PushSettingCardKey, PushSettingCardTeam, PushSettingCardFriends, PushSettingCardTeamWithSwap, PushSettingCardPowerPlan, InstanceTeamSettingCard
 from .card.timepickersettingcard1 import TimePickerSettingCard1
 from .card.expandable_switch_setting_card import ExpandableSwitchSettingCard, ExpandableComboBoxSettingCardUpdateSource, ExpandableComboBoxSettingCard, ExpandableComboBoxSettingCardInstanceType, ExpandableSwitchSettingCardEchoofwar
 from .card.messagebox_custom import MessageBoxEdit
+from .card.stationprioritysettingcard import StationPrioritySettingCard
 from module.config import cfg
 from module.notification import init_notifiers
 from module.localization import tr
@@ -21,6 +22,78 @@ from tasks.base.tasks import start_task
 from .tools.check_update import checkUpdate
 import os
 import sys
+
+
+class _PivotScrollFilter(QObject):
+    """为 pivot 及其所有子控件（tab 按钮）提供横向拖拽滚动支持。
+
+    安装方式（在所有 addItem 完成后）：
+        self.pivot.installEventFilter(filter)
+        for child in self.pivot.findChildren(QWidget):
+            child.installEventFilter(filter)
+
+    拖拽后防止误切 tab 的机制：
+        进入拖拽模式后立即对 pivot 调用 grabMouse()，把后续所有鼠标事件
+        路由到 pivot 而非 tab 子控件。松开时 releaseMouse() 还原路由，
+        并对 pivot 发送 Leave 事件重置 hover 状态，完全杜绝误切 tab。
+    """
+    _DRAG_THRESHOLD = 5  # px；低于此值视为点击，不进入拖拽模式
+
+    def __init__(self, scroll_area: QScrollArea, pivot):
+        super().__init__(scroll_area)
+        self._sa = scroll_area
+        self._pivot = pivot
+        self._press_global: QPoint | None = None
+        self._drag_origin: int = 0
+        self._is_dragging: bool = False
+
+    def eventFilter(self, obj, event: QEvent) -> bool:
+        t = event.type()
+
+        # ── 滚轮 → 横向滚动（消费，不冒泡给外层纵向 ScrollArea）───────
+        if t == QEvent.Type.Wheel:
+            delta = event.angleDelta()
+            scroll = delta.x() if delta.x() != 0 else delta.y()
+            sb = self._sa.horizontalScrollBar()
+            sb.setValue(sb.value() - scroll // 3)
+            return True
+
+        # ── 按下 → 记录全局起点，放行（tab 正常 press/hover）────────────
+        if t == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+            self._press_global = event.globalPosition().toPoint()
+            self._drag_origin = self._sa.horizontalScrollBar().value()
+            self._is_dragging = False
+            return False
+
+        # ── 移动 → 超阈值进入拖拽，grabMouse 接管后续事件 ───────────────
+        if t == QEvent.Type.MouseMove and (event.buttons() & Qt.MouseButton.LeftButton):
+            if self._press_global is not None:
+                dx = event.globalPosition().toPoint().x() - self._press_global.x()
+                if not self._is_dragging and abs(dx) > self._DRAG_THRESHOLD:
+                    self._is_dragging = True
+                    # grabMouse：把所有后续鼠标事件路由到 pivot，
+                    # 子控件（tab 按钮）不再收到 Release/Click，彻底防止误切 tab
+                    self._pivot.grabMouse(Qt.CursorShape.ClosedHandCursor)
+                if self._is_dragging:
+                    self._sa.horizontalScrollBar().setValue(self._drag_origin - dx)
+                    return True
+            return False
+
+        # ── 释放 → 拖拽：releaseMouse + 发送 Leave，清理状态 ────────────
+        if t == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
+            if self._press_global is not None:
+                was_dragging = self._is_dragging
+                self._press_global = None
+                self._is_dragging = False
+                if was_dragging:
+                    self._pivot.releaseMouse()
+                    # 发送 Leave 事件让 pivot 及子控件重置 hover 样式
+                    leave = QEvent(QEvent.Type.Leave)
+                    QApplication.sendEvent(self._pivot, leave)
+                    return True  # 消费 Release，不触发 tab 切换
+            return False
+
+        return False
 
 
 class SettingInterface(ScrollArea):
@@ -76,6 +149,18 @@ class SettingInterface(ScrollArea):
         self.scrollWidget.setObjectName('scrollWidget')
         self.settingLabel.setObjectName('settingLabel')
         StyleSheet.SETTING_INTERFACE.apply(self)
+
+        # ── 选项卡滚动容器 ──────────────────────────────────────────────
+        # 当标签文字较长（如英语）时允许横向滚动。滚动条隐藏，仅保留拖拽交互。
+        # 注意：不在此处安装 _PivotScrollFilter，因为 pivot 的 tab 子控件
+        # 尚未创建（addItem 在 __initLayout 中调用）。filter 在 __initLayout
+        # 最后通过 pivot.findChildren(QWidget) 递归安装，覆盖所有 tab 子控件。
+        self.pivotScrollArea = QScrollArea(self)
+        self.pivotScrollArea.setWidget(self.pivot)
+        self.pivotScrollArea.setWidgetResizable(False)
+        self.pivotScrollArea.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.pivotScrollArea.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.pivotScrollArea.setFrameShape(QFrame.Shape.NoFrame)
 
         QScroller.grabGesture(self.viewport(), QScroller.ScrollerGestureType.LeftMouseButtonGesture)
         scroller = QScroller.scroller(self.viewport())
@@ -362,6 +447,14 @@ class SettingInterface(ScrollArea):
             "reward_redemption_code_enable"
         )
 
+        # 短信奖励开关
+        self.messageEnableCard = SwitchSettingCard1(
+            FIF.CHAT,
+            tr('短信'),
+            None,
+            "reward_message_enable"
+        )
+
         self.assetEnableCard = ExpandableSwitchSettingCard(
             "asset_manager_enable",
             FIF.LIBRARY,
@@ -402,11 +495,38 @@ class SettingInterface(ScrollArea):
             tr("在领取积分奖励后自动执行位面饰品快速提取消耗深度沉浸器"),
             "currencywars_bonus_enable"
         )
+        self.currencywarsRankDifficultyCard = ComboBoxSettingCard2(
+            "currencywars_rank_difficulty",
+            FIF.HISTORY,
+            tr('职级难度'),
+            '',
+            texts={tr('最低职级'): 'lowest', tr('最高职级'): 'highest'}
+        )
         self.currencywarsFastModeCard = SwitchSettingCard1(
             FIF.SPEED_HIGH,
             tr('启用速通模式'),
             tr("开启后，仅在首领节点尝试装备武器"),
             "currencywars_fast_mode"
+        )
+        self.currencywarsStrategyCard = ExpandableComboBoxSettingCard(
+            "currencywars_strategy",
+            FIF.BOOK_SHELF,
+            tr('货币战争策略'),
+            '',
+            {tr('默认'): 'default', tr('阿格莱雅'): 'aglaea'}
+        )
+        self.currencywarsRemembranceTrailblazerNameCard = PushSettingCardStr(
+            tr('修改'),
+            FIF.EDIT,
+            tr('「开拓者•记忆」名称'),
+            "currencywars_remembrance_trailblazer_name",
+            empty_content=tr('未配置，阿格莱雅策略下将跳过该角色，需要填入自己游戏名称')
+        )
+        self.currencywarsStrategyRestartOnSpecialTagsCard = SwitchSettingCard1(
+            FIF.SYNC,
+            tr('遇到特定词条时接受重开'),
+            tr('根据所选策略，在遇到特定词条或词条组合时允许重开'),
+            "currencywars_strategy_restart_on_special_tags"
         )
 
         self.UniverseGroup = SettingCardGroup(tr("差分宇宙"), self.scrollWidget)
@@ -431,9 +551,9 @@ class SettingInterface(ScrollArea):
         )
         self.weeklyDivergentLevelCard = RangeSettingCard1(
             "weekly_divergent_level",
-            [1, 5],
+            [1, 6],
             FIF.HISTORY,
-            tr("难度等级"),
+            tr("难度等级（难度6对应常规演算星阶模式）"),
             "",
         )
         self.weeklyDivergentBonusEnableCard = SwitchSettingCard1(
@@ -447,6 +567,12 @@ class SettingInterface(ScrollArea):
             tr('启用稳定模式'),
             tr("运行若出现问题可尝试开启，适配低性能环境，云游戏默认使用此模式"),
             "weekly_divergent_stable_mode"
+        )
+
+        self.stationPriorityCard = StationPrioritySettingCard(
+            FIF.MENU,
+            tr('站点优先级'),
+            tr("自定义差分宇宙「选择下一站」的站点优先级"),
         )
 
         self.universeEnableCard = ExpandableSwitchSettingCard(
@@ -1319,6 +1445,13 @@ class SettingInterface(ScrollArea):
             tr("更新将包含依赖组件，建议保持开启。若关闭此选项，需自行手动更新依赖组件，可能会导致出现不可预期的错误。"),
             "update_full_enable"
         )
+        self.updateDownloadProxyCard = PushSettingCardStr(
+            tr('修改'),
+            FIF.GLOBE,
+            tr("下载代理"),
+            "update_download_proxy",
+            empty_content=tr("留空则使用系统代理；支持 http:// 和 socks5://")
+        )
         self.mirrorchyanCdkCard = PushSettingCardMirrorchyan(
             tr('修改'),
             FIF.BOOK_SHELF,
@@ -1330,13 +1463,27 @@ class SettingInterface(ScrollArea):
             "ui_language",
             FIF.LANGUAGE,
             '界面语言 / 界面語言 / 인터페이스 언어 / UI Language',
-            '需要重启程序生效 / 需要重啟程式生效 / 변경 사항을 적용하려면 재시작 필요 / Requires restart to take effect',
+            '切换后即时生效 / 切換後即時生效 / 변경 즉시 적용 / Takes effect immediately',
             texts={'自动': 'auto', '简体中文': 'zh_CN', '繁體中文': 'zh_TW', '한국어': 'ko_KR', 'English': 'en_US'}
         )
 
     def __initLayout(self):
         self.settingLabel.move(36, 30)
-        self.pivot.move(40, 80)
+        # pivot 位于 pivotScrollArea 内；x=40 与标题对齐，y=80 与原位置一致
+        # height=54：pivot ~46px + 8px 供 AsNeeded 滚动条偶尔占用，底边 y=134
+        # setViewportMargins(0, 140, ...) 保留 6px 间距，不影响内容区域
+        self.pivotScrollArea.move(40, 80)
+        self.pivotScrollArea.setFixedHeight(46)  # pivot 本身高度，无需为滚动条留空
+        # ── 关键修复：构造时必须给 scroll area 设置初始宽度 ──────────────
+        # self.width() 在 __init__ 期间为 0（QWidget 尚未布局），
+        # 但 self.parent 是已显示的 MainWindow，其宽度有效（≥960）。
+        # 若无法取到父宽度则回退到最小窗口宽度 960。
+        # resizeEvent 会在窗口缩放时持续更新该值。
+        try:
+            initial_w = self.parent.width() if self.parent and self.parent.width() > 0 else 960
+        except Exception:
+            initial_w = 960
+        self.pivotScrollArea.setFixedWidth(max(initial_w - 40, 400))
         # self.title_area.move(36, 80)
         # self.vBoxLayout.addWidget(self.pivot, 0, Qt.AlignTop)
         self.vBoxLayout.addWidget(self.stackedWidget, 0, Qt.AlignmentFlag.AlignTop)
@@ -1400,7 +1547,8 @@ class SettingInterface(ScrollArea):
             self.questEnableCard,
             self.srpassEnableCard,
             self.redemptionEnableCard,
-            self.achievementEnableCard
+            self.achievementEnableCard,
+            self.messageEnableCard
         ])
         self.DailyGroup.addSettingCard(self.assetEnableCard)
         self.assetEnableCard.addSettingCards(
@@ -1415,15 +1563,22 @@ class SettingInterface(ScrollArea):
         ])
         self.CurrencywarsGroup.addSettingCard(self.currencywarsTypeCard)
         self.CurrencywarsGroup.addSettingCard(self.currencywarsBonusEnableCard)
-        self.CurrencywarsGroup.addSettingCard(self.currencywarsFastModeCard)
+        self.CurrencywarsGroup.addSettingCard(self.currencywarsRankDifficultyCard)
+        self.CurrencywarsGroup.addSettingCard(self.currencywarsStrategyCard)
+        self.currencywarsStrategyCard.addSettingCards([
+            self.currencywarsRemembranceTrailblazerNameCard,
+            self.currencywarsStrategyRestartOnSpecialTagsCard,
+            self.currencywarsFastModeCard
+        ])
 
         self.UniverseGroup.addSettingCard(self.weeklyDivergentEnableCard)
         self.weeklyDivergentEnableCard.addSettingCards([
             self.weeklyDivergentRunTimeCard
         ])
         self.UniverseGroup.addSettingCard(self.weeklyDivergentTypeCard)
-        self.UniverseGroup.addSettingCard(self.weeklyDivergentLevelCard)
         self.UniverseGroup.addSettingCard(self.weeklyDivergentBonusEnableCard)
+        self.UniverseGroup.addSettingCard(self.weeklyDivergentLevelCard)
+        self.UniverseGroup.addSettingCard(self.stationPriorityCard)
         self.UniverseGroup.addSettingCard(self.weeklyDivergentStableModeCard)
 
         self.UniverseGroup.addSettingCard(self.universeEnableCard)
@@ -1547,7 +1702,8 @@ class SettingInterface(ScrollArea):
         self.updateSourceCard.addSettingCards([
             self.checkUpdateCard,
             self.updatePrereleaseEnableCard,
-            self.updateFullEnableCard
+            self.updateFullEnableCard,
+            self.updateDownloadProxyCard
         ])
         self.AboutGroup.addSettingCard(self.mirrorchyanCdkCard)
         self.AboutGroup.addSettingCard(self.languageCard)
@@ -1594,6 +1750,22 @@ class SettingInterface(ScrollArea):
         self.pivot.setCurrentItem(self.stackedWidget.currentWidget().objectName())
         self.stackedWidget.setFixedHeight(self.stackedWidget.currentWidget().sizeHint().height())
 
+        # ── pivot 尺寸与滚动过滤器 ────────────────────────────────────
+        # 所有 addItem 调用完成后 pivot 才能计算正确宽度
+        self.pivot.adjustSize()
+        # 将滚动/拖拽过滤器安装到 pivot 本身及其所有子控件（tab 按钮）
+        # 只在 viewport 上安装不够：tab 子控件直接收到鼠标事件，不经过 viewport
+        self._pivot_scroll_filter = _PivotScrollFilter(self.pivotScrollArea, self.pivot)
+        self.pivot.installEventFilter(self._pivot_scroll_filter)
+        for child in self.pivot.findChildren(QWidget):
+            child.installEventFilter(self._pivot_scroll_filter)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # 随窗口宽度同步 pivot 滚动容器宽度（right margin = 40px 与布局对齐）
+        if self.width() > 0:
+            self.pivotScrollArea.setFixedWidth(max(self.width() - 40, 400))
+
     def __connectSignalToSlot(self):
         # self.importConfigCard.clicked.connect(self.__onImportConfigCardClicked)
         self.gamePathCard.clicked.connect(self.__onGamePathCardClicked)
@@ -1621,6 +1793,7 @@ class SettingInterface(ScrollArea):
         self.rewardEnableCard.expandStateChanged.connect(self.__onExpandableCardStateChanged)
         self.assetEnableCard.expandStateChanged.connect(self.__onExpandableCardStateChanged)
         self.currencywarsEnableCard.expandStateChanged.connect(self.__onExpandableCardStateChanged)
+        self.currencywarsStrategyCard.expandStateChanged.connect(self.__onExpandableCardStateChanged)
         self.fightEnableCard.expandStateChanged.connect(self.__onExpandableCardStateChanged)
         self.weeklyDivergentEnableCard.expandStateChanged.connect(self.__onExpandableCardStateChanged)
         self.universeEnableCard.expandStateChanged.connect(self.__onExpandableCardStateChanged)

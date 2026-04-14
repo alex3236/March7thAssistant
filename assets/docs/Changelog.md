@@ -1,5 +1,28 @@
 # 更新日志
 
+## v2026.4.17
+- 货币战争新增职级选择
+- 货币战争新增阿格莱雅策略
+- 货币战争支持开拓者•记忆（需手动配置名称）
+- 新增短信奖励领取功能 [#964](https://github.com/moesnow/March7thAssistant/pull/964) @g60cBQ
+- 新增更新支持手动配置代理
+- 主页新增编辑按钮支持自定义卡片
+- 添加命令行参数允许启动时不立即执行 [#970](https://github.com/moesnow/March7thAssistant/pull/970) @sgpublic
+- 修复部分文字OCR识别错误 [#966](https://github.com/moesnow/March7thAssistant/pull/966) @JackyTang1
+- 优化性能和稳定性并修复若干已知问题
+- [欢迎关注我们的B站账号，获取最新动态和教程](https://space.bilibili.com/3706960664857075)
+
+## v2026.4.14
+- 支持在游戏内显示日志
+- 差分宇宙支持事件类型关卡
+- 差分宇宙支持自定义站点选择优先级
+- 差分宇宙可选星阶模式 [#953](https://github.com/moesnow/March7thAssistant/pull/953) @JackyTang1
+- 图形界面语言切换后支持热重载&设置选项卡支持横向滚动 [#962](https://github.com/moesnow/March7thAssistant/pull/962) @360NENZ
+- 优化和修复差分宇宙若干已知问题
+- 修复通过抽卡记录复制链接后在小程序内无法使用
+- 优化性能和稳定性并修复若干已知问题
+- [欢迎关注我们的B站账号，获取最新动态和教程](https://space.bilibili.com/3706960664857075)
+
 ## v2026.4.9
 - 适配差分宇宙-乐园漫记
 - 货币战争新增速通模式
@@ -10,7 +33,6 @@
 - 优化和修复差分宇宙若干已知问题
 - 图形界面支持自定义记忆窗口大小或位置
 - 优化性能和稳定性并修复若干已知问题
-- [欢迎关注我们的B站账号，获取最新动态和教程](https://space.bilibili.com/3706960664857075)
 
 ## v2026.3.25
 - 支持 4.1 版本新增关卡
