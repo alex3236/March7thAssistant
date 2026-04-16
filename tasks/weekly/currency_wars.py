@@ -504,6 +504,7 @@ class CurrencyWars:
         aglaea3_img = "./assets/images/share/aglaea/aglaea3.png"
         remembrance_trailblazer_name = self.get_remembrance_trailblazer_name()
         # 打开商店
+        log.info("打开商店购买角色")
         auto.click_element(shop_button_crop, "crop")
         time.sleep(2)
         money = self.check_money()
@@ -577,6 +578,7 @@ class CurrencyWars:
             else:
                 break
         # 关闭商店
+        log.info("关闭商店")
         auto.click_element(shop_button_crop, "crop")
         time.sleep(2)
         if buy_anything:
@@ -589,6 +591,7 @@ class CurrencyWars:
         shop_crop = (344 / 1920, 19 / 1080, 1370 / 1920, 336 / 1080)
         remembrance_trailblazer_name = self.get_remembrance_trailblazer_name()
         # 打开商店
+        log.info("打开商店购买角色")
         auto.click_element(shop_button_crop, "crop")
         time.sleep(2)
         money = self.check_money()
@@ -677,6 +680,7 @@ class CurrencyWars:
                     break
 
         # 关闭商店
+        log.info("关闭商店")
         auto.click_element(shop_button_crop, "crop")
         time.sleep(2)
         if buy_anything:
@@ -727,6 +731,7 @@ class CurrencyWars:
                     log.info("检测到好运令牌，尝试使用好运令牌")
                     try_equip(result, aglaea_position)
                     if auto.click_element("反重力皮靴", "text", crop=(534 / 1920, 247 / 1080, 1129 / 1920, 45 / 1080)):
+                        time.sleep(2)
                         log.info("成功使用好运令牌，获得了反重力皮靴")
                         cnt += 1
                         # 只需要一双皮靴
@@ -778,12 +783,14 @@ class CurrencyWars:
         for _ in range(4):
             if self.shoe_count < 4:
                 if result := auto.find_element(shoe_img, "image", 0.9, crop=equip_crop):
+                    log.info("检测到轮滑鞋，尝试装备轮滑鞋")
                     try_equip(result, aglaea_position)
                     self.shoe_count += 1
                 else:
                     break
 
         if result := auto.find_element(propeller_img, "image", 0.9, crop=equip_crop):
+            log.info("检测到螺旋桨，尝试装备螺旋桨")
             try_equip(result, aglaea_position)
             self.propeller_count = 1
 
@@ -1558,12 +1565,17 @@ class CurrencyWars:
                 log.error("开启宝箱操作超时，退出循环")
                 break
 
+            log.info("检测到开启按钮，尝试点击")
             auto.click_element_with_pos(res, action="down")
             time.sleep(0.2)
             auto.mouse_up()
-            time.sleep(2)
+            time.sleep(4)
+
+            success = False
             if auto.find_element(('武装箱', '星徽秘典'), "text", None, crop=(1012.0 / 1920, 27.0 / 1080, 173.0 / 1920, 56.0 / 1080), include=True):
-                if cfg.currencywars_strategy == "aglaea" and self.shoe_count < 4 and auto.click_element("轮滑鞋", "text", crop=(535 / 1920, 268 / 1080, 1129 / 1920, 45 / 1080)):
+                log.info(f"检测到{auto.matched_text}选项，尝试点击")
+                success = True
+                if cfg.currencywars_strategy == "aglaea" and self.shoe_count < 4 and auto.click_element("轮滑鞋", "text", crop=(535 / 1920, 268 / 1080, 1129 / 1920, 45 / 1080), include=True):
                     log.info("检测到轮滑鞋选项，尝试点击")
                 else:
                     pos = (533.0 / 1920, 135.0 / 1080, 258.0 / 1920, 181.0 / 1080)
@@ -1571,6 +1583,8 @@ class CurrencyWars:
                 time.sleep(2)
             # 聘用书坐标尚未经过测试
             if auto.find_element("聘用书", "text", None, crop=(923.0 / 1920, 21.0 / 1080, 168.0 / 1920, 74.0 / 1080), include=True):
+                log.info("检测到聘用书选项，尝试点击")
+                success = True
                 if cfg.currencywars_strategy == "aglaea":
                     remembrance_trailblazer_name = self.get_remembrance_trailblazer_name()
                     preferred_characters = ["瓦尔特", "昔涟"]
@@ -1584,9 +1598,14 @@ class CurrencyWars:
                     auto.click_element(pos, "crop")
                 time.sleep(2)
             if auto.find_element("专家邀请函", "text", None, crop=(949 / 1920, 27 / 1080, 153 / 1920, 56 / 1080), include=True):
+                log.info("检测到专家邀请函选项，尝试点击")
+                success = True
                 pos = (769 / 1920, 134 / 1080, 245 / 1920, 276 / 1080)
                 auto.click_element(pos, "crop")
                 time.sleep(2)
+            if not success:
+                log.warning("未检测到可点击的选项")
+                continue
             res = auto.find_element("开启", "text", None, crop=(376.0 / 1920, 839.0 / 1080, 1125.0 / 1920, 148.0 / 1080), include=True)
 
     def check_character_status(self):
@@ -1682,6 +1701,7 @@ class CurrencyWars:
                 elif name == "符玄":
                     self.has_fuxuan = True
                 elif name == "银狼":
+                    money = "2"
                     self.has_silverwolf = True
                 elif name == "花火":
                     self.has_sparkle = True
@@ -1718,18 +1738,46 @@ class CurrencyWars:
         """
         检查并点击继续类别的按钮
         """
-        if auto.click_element(("点击空白处继续", "下一步", "继续挑战", "前往结算", "下一页", "确认选择"), 'text', None, include=True):
+        if result := auto.find_element(("点击空白处继续", "下一步", "继续挑战", "前往结算", "下一页", "确认选择"), 'text', None, include=True):
             log.info(f"检测到{auto.matched_text}按钮，尝试点击")
+
             if auto.matched_text == "下一页":
                 self._check_battle_result()
-
-            if cfg.currencywars_strategy == "aglaea" and cfg.currencywars_strategy_restart_on_special_tags:
+                auto.click_element_with_pos(result)
+            elif cfg.currencywars_strategy == "aglaea" and cfg.currencywars_strategy_restart_on_special_tags:
                 if auto.matched_text == "下一步":
-                    self._check_boss_tag()
+                    time.sleep(2)  # 等待BOSS词条加载完成
+                    if auto.click_element("下一步", 'text', None, include=True):
+                        self._check_boss_tag()
+                else:
+                    auto.click_element_with_pos(result)
+            else:
+                auto.click_element_with_pos(result)
 
     def _check_boss_tag(self):
-        black_tags = ["正当防卫", "沉重脚步", "永久创伤", "能量逃逸", "忍无可忍", "同步行动"]
-        black2_tags = ["决战在即", "战个痛快", "免死金牌", "榜样激励"]
+        # 沉重脚步：敌人攻击我方队员后，使受到攻击的我方队员行动延后8%。
+        # 能量逃逸：敌人受到攻击后，使攻击者能量降低4点，如果能量达到上限则不降低。
+        # 忍无可忍：敌人受到7次攻击后，行动提前100%。
+        # 同步行动：我方小队获得行动提前效果时，随机使一名精英/首领敌人行动提前20%。
+        # 决战在即：首领节点的倒计时减少30，但遭遇节点的倒计时增加20。
+        # 战个痛快：战斗节点的倒计时减少30，但首领节点的倒计时增加20。
+        # 正当防卫：敌人受到我方前台攻击时，对施放攻击的我方目标造成等同于120%攻击力的伤害，该伤害无法消灭我方目标。
+        # 免死金牌：敌人受到攻击期间，若生命值百分比小于1%，使当前生命值变为生命上限的10%，并在本次攻击内不会降低至该值以下，每名敌人只能触发1次该效果。
+        # 榜样激励：伤害统计排名第一的队员造成的伤害为原伤害的75%，其他队员造成的伤害为原伤害的110%。
+        # 永久创伤：我方小队生命值降低时，会减少等同于生命值降低值20%的生命上限，最多降低生命上限的60%。
+        # 变宝为废：每个位面开始时，首次合成的进阶装备会有50%的概率变成垃圾袋。
+        # 额外打击：我方队员每有1个空缺装备栏，受到敌人攻击后，额外受到本次攻击伤害8%的真实伤害。
+        black_tags = ["沉重脚步", "能量逃逸", "忍无可忍", "同步行动", "决战在即", "战个痛快", "正当防卫", "免死金牌", "榜样激励", "永久创伤", "变宝为废", "额外打击"]
+
+        # 雷之熄火：进入战斗时，我方小队中的雷属性目标造成伤害时只能造成1点伤害，施放4次攻击后解除。
+        # 一鼓作气：敌人首次行动后，行动提前100%。
+        # 应激反应：敌人的生命值百分比降低至小于50%时，行动提前100%。
+        # 灼热轰炸：进入战斗时，我方前台在场的第一位角色受到攻击的概率大幅提高。敌人施放攻击后，使攻击目标陷入灼烧状态，回合开始时受到等同 于生命上限12%的火属性持续伤害，持续3回合，该灼烧状态可叠加。
+        # 忽快忽慢：战斗开始时，速度增幅最高的两名我方角色降低40%速度增幅，最低的两名我方角色提高25%速度增幅。
+        # 成长的烦恼：在你达到8级后，每次购买经验会损失1金币。
+        # 极速制冷：我方前台回合结束时，本回合中每消耗1个战技点，就有15%固定概率陷入冻结状态，持续1回合。
+        # 坠入陷阱：战斗开始时，我方前台有40%基础概率陷入禁锢、纠缠状态，使其行动延后20%，持续1回合。
+        black2_tags = ["雷之熄火", "一鼓作气", "应激反应", "灼热轰炸", "忽快忽慢", "成长的烦恼", "极速制冷", "坠入陷阱"]
 
         # black_tags 直接重开，black2_tags 超过1个才重开
         black2_count = 0
@@ -1820,6 +1868,37 @@ class CurrencyWars:
             ]
             has_choose = False
 
+            # 投资环境：
+            # 昼之半神概念股：开局时获得【昼之半神】角色和初始简易装备，【昼之半神】角色的刷新概率提高。
+            # 能量概念股：开局时获得【能量】角色和初始简易装备，【能量】角色的刷新概率提高。
+            # 火药味：开局时获得2个简易武装箱。
+            # 过剩经费：补给阶段中，角色会携带两件装备。
+            # 红钻贵族：开局时拥有【红钻】和一个【简易武装箱】。
+            # 蓝钻贵族：开局时拥有【蓝钻】和一个【简易武装箱】。
+            # 增发货币：第一/二/三位面开始时，获得一个6/8/12金币的晶矿。
+            # 成功经验：在你升到8级后，进入接下来3个节点时，获得12经验。
+            # 二手市场：商店刷新20次后，获得30金币和【员工投影仪】。
+            # 昼之半神邀请：获得一个【昼之半神星徽】
+            # 量子同频邀请：获得一个【量子同频星徽】
+            # 能量邀请：获得一个【能量星徽】
+            # 特权阶级：第二位面开始时，获得1个特权武装箱。
+
+            # 投资策略：
+            # 公司军火更新：每次进入新节点时，你物品栏里的装备变为同品质的其他装备。balabala
+            # 超光速提拔：战斗开始时：1个随机的1费角色在这场战斗中升为4星，并获得5%前/后台强度。
+            # 自由市场：每当你将要获得一件简易装备时，改为获得1个【简易武装箱】。获得1个随机的简易装备。
+            # 优势火力论：获得1个【特权赋予卡】和1个【简易武装箱】。
+            # 淘金客：你每次消耗金币刷新商店，都会获得2经验值。
+
+            if cfg.currencywars_strategy == "aglaea":
+                white_list = ('昼之半神概念股', '能量概念股', '火药味', '过剩经费', '红钻贵族', '蓝钻贵族', '增发货币', '成功经验', '二手市场', '昼之半神邀请', '量子同频邀请', '能量邀请', '特权阶级')
+                white_list += ('公司军火更新', '超光速提拔', '自由市场', '优势火力论', '淘金客')
+                for pos in button_positions:
+                    if auto.click_element(white_list, 'text', crop=pos, include=True):
+                        log.info(f"检测到{auto.matched_text}选项，尝试点击")
+                        has_choose = True
+                        break
+
             # 不方便判断的选项，暂时跳过处理
             # 深井角斗场：本局首次达成5连胜时，获得【财富宝钻】。
             # 佩佩客串：进入5个节点后，阿兰接走佩佩们并留下所有装备。
@@ -1828,17 +1907,14 @@ class CurrencyWars:
             # 降本增效：出售场上和备战席的所有角色
             # 大裁员：出售场上和备战席的所有角色
             # 人力重组：移除场上和备战席的所有角色
+            # 全员晋升：场上的所有角色会永久升级成比自身高1费的随机角色(最大5费)。获得2个【拆装扳手】。
             # 节省工位：在接下来3个节点只有3个备战席位置
             # 奋斗协议：购买经验值消耗7点小队生命值而非金币
             # 专家研讨会：获得1个【专家邀请函】和1个【简易武装箱】。
-
-            if cfg.currencywars_strategy == "aglaea":
-                white_list = ('能量概念股', '火药味', '成功经验', '公司军火更新', '超光速提拔', '自由市场', '优势火力论', '淘金客')
-                for pos in button_positions:
-                    if auto.click_element(white_list, 'text', crop=pos, include=True):
-                        log.info(f"检测到{auto.matched_text}选项，尝试点击")
-                        has_choose = True
-                        break
+            # 快请专家：获得X个【专家邀请函】balabala
+            # 英雄登场：获得1个2星5费角色，19个节点后才能将其上场。战斗完胜后，上场节点额外提前1点。
+            # 命运礼物：立刻获得一个【惊喜盒】，倒计时12个节点后礼盒打开，战斗完胜后，倒计时额外减少1点。
+            # 独家代言：从3件进阶装备中选择一件获取。本局游戏中，你获得组成该装备的简易装备时，改为获得该进阶装备。
 
             black_list = ('深井角斗场', '佩佩客串', '钻石商人', '现金为王', '降本增效', '大裁员', '人力重组', '全员晋升', '节省工位', '奋斗协议', '专家研讨会', '快请专家', '英雄登场', '命运礼物', '独家代言')
             if not has_choose:
