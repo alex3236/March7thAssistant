@@ -1,0 +1,42 @@
+name: Upstream Sync (opt <- upstream/main)
+
+on:
+  schedule:
+    - cron: '0 21 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: opt
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream from metadata
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Use 'gh' to get the parent repository's URL
+          UPSTREAM_URL=https://github.com/moesnow/March7thAssistant.git
+          echo "Upstream: $UPSTREAM_URL"
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch upstream main
+
+      - name: Merge upstream/main into opt
+        run: |
+          # This fails the job if there are conflicts
+          git merge upstream/main --no-edit
+
+      - name: Push to origin
+        run: git push origin opt
