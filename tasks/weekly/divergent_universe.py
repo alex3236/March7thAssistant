@@ -134,6 +134,8 @@ class DivergentUniverse:
             log.error("选择关卡失败，结束任务")
             return False
 
+        self.choose_team()
+
         if type == "normal" and int(cfg.weekly_divergent_level) == 6:
             if not auto.click_element("./assets/images/screen/divergent_universe/astronomical.png", "image", 0.9, 10):
                 log.error("未找到进入星阶模式按钮，结束任务")
@@ -180,6 +182,20 @@ class DivergentUniverse:
                         break
             return True
         return False
+
+    def choose_team(self):
+        team_slot_crop = (1098 / 1920, 922 / 1080, 375 / 1920, 96 / 1080)
+        if auto.find_element("./assets/images/share/universe/empty_character_slot.png", "image_count", 0.8, crop=team_slot_crop, pixel_bgr=[233, 233, 233]) == 4:
+            if auto.click_element("./assets/images/share/universe/empty_character_slot.png", "image", 0.8, crop=team_slot_crop, take_screenshot=False):
+                time.sleep(2)
+                if auto.click_element("预设编队", "text", max_retries=4, retry_delay=0.5, crop=(6 / 1920, 8 / 1080, 578 / 1920, 168 / 1080)):
+                    click_x = auto.screenshot_pos[0] + 260 / auto.screenshot_scale_factor
+                    click_y = auto.screenshot_pos[1] + 175 / auto.screenshot_scale_factor
+                    time.sleep(1.0)
+                    if auto.click_element_with_pos(((click_x, click_y), (click_x, click_y))):
+                        time.sleep(1.0)
+                        auto.press_key("esc")
+            time.sleep(1.0)
 
     def loop(self) -> bool:
         """
@@ -922,11 +938,11 @@ class DivergentUniverse:
         ]
         if auto.click_element(("选择一张面具", "确定"), 'text'):
             if auto.matched_text == "选择一张面具":
-                for pos in mask_positions:
-                    if auto.click_element("战车面具", "text", crop=pos):
-                        log.info("检测到战车面具，优先选择")
-                        time.sleep(2)
-                        return
+                # for pos in mask_positions:
+                #     if auto.click_element("战车面具", "text", crop=pos):
+                #         log.info("检测到战车面具，优先选择")
+                #         time.sleep(2)
+                #         return
                 log.info("默认选择中间的面具")
                 auto.click_element(mask_positions[1], 'crop')
                 time.sleep(2)
@@ -1216,7 +1232,7 @@ class DivergentUniverse:
 
     def process_station_card(self):
         if auto.find_element(("删除", "使其变为【空白】区域"), "text", crop=(110 / 1920, 136 / 1080, 1226 / 1920, 48 / 1080), include=True):
-            auto.click_element(("异常", "事件", "奖励", "冒险", "铸造"), "text", crop=(59 / 1920, 243 / 1080, 1262 / 1920, 786 / 1080), include=True)
+            auto.click_element(("冒险", "铸造"), "text", crop=(59 / 1920, 243 / 1080, 1262 / 1920, 786 / 1080), include=True)
         auto.click_element('确定', 'text', None, 10, crop=(1589 / 1920, 919 / 1080, 73 / 1920, 38 / 1080), include=True)
         time.sleep(2)
 
@@ -1243,10 +1259,10 @@ class DivergentUniverse:
 
     def check_click_close(self):
         """
-        检查并点击 “点击空白处关闭” 的按钮
+        检查并点击 “点击空白处关闭” 或 “点击领取今日补给” 的按钮
         """
-        if auto.click_element("点击空白处关闭", 'text', None, crop=(816 / 1920, 778 / 1080, 284 / 1920, 298 / 1080), include=True):
-            log.info(f"检测到 “点击空白处关闭” 的按钮，尝试点击")
+        if auto.click_element(("点击空白处关闭", "点击领取今日补给"), 'text', None, crop=(816 / 1920, 778 / 1080, 284 / 1920, 298 / 1080), include=True):
+            log.info(f"检测到 “{auto.matched_text}” 的按钮，尝试点击")
             return True
         return False
 
@@ -1290,6 +1306,7 @@ class DivergentUniverse:
         """
         检查并记录对局结果
         """
+        time.sleep(2)  # 等待分析报告加载完成后再截图
         if auto.find_element(("探索成功", "探索中断"), 'text', include=True):
             if auto.matched_text == "探索成功":
                 self.result = True
