@@ -387,6 +387,8 @@ class CurrencyWars:
                 log.info(f"本次货币战争用时：{minutes} 分钟 {seconds} 秒")
                 return self.result if self.result is not None else False
 
+            time.sleep(2)
+
     def check_main_screen(self):
         """
         检查并处理主界面逻辑
@@ -1302,6 +1304,7 @@ class CurrencyWars:
         self._log_character_status()
 
         # 检查可能弹出的特殊选择框
+        time.sleep(1)
         self.check_festival_star_popup()
         return True
 
