@@ -20,6 +20,24 @@ OCR_SLOW_THRESHOLD = 5.0
 # 这个值越小，峰值越低，但 full GC 触发越频繁；这里先取一个对 OCR 热路径
 # 较低侵入的经验值 20，优先解决长时间任务中的内存峰值问题。
 OCR_PERIODIC_FULL_GC_INTERVAL = 20
+# OpenVINO 存在内存泄漏问题，每隔此时间（秒）重新初始化一次 OCR 实例以释放内存
+OCR_OPENVINO_REINIT_INTERVAL = 300
+
+OCR_MODE_AUTO = "auto"
+OCR_MODE_GPU = "gpu"
+OCR_MODE_ONNX_DML = "onnx_dml"
+OCR_MODE_CPU = "cpu"
+OCR_MODE_OPENVINO_CPU = "openvino_cpu"
+OCR_MODE_ONNX_CPU = "onnx_cpu"
+
+OCR_MODE_CHOICES = {
+    OCR_MODE_AUTO,
+    OCR_MODE_GPU,
+    OCR_MODE_ONNX_DML,
+    OCR_MODE_CPU,
+    OCR_MODE_OPENVINO_CPU,
+    OCR_MODE_ONNX_CPU,
+}
 
 
 class OCR:
@@ -30,12 +48,15 @@ class OCR:
         self.replacements = replacements
         self._use_dml = None  # None 表示未初始化，True/False 表示是否使用 DML
         self._dml_fallback = False  # 是否已降级到 CPU 模式
+        self._selected_mode = OCR_MODE_AUTO  # 配置中的 OCR 模式
+        self._resolved_mode = OCR_MODE_AUTO  # 实际生效的 OCR 模式（可能因环境回退）
         self._using_openvino = False  # 当前是否使用 OpenVINO 引擎
         self._openvino_fallback = False  # 是否已从 OpenVINO 降级到 ONNXRuntime
         self._cfg = None  # 配置对象引用，延迟获取避免循环导入
         self.ocr_time = 0.0
         self.ocr_count = 0
         self._periodic_gc_interval = OCR_PERIODIC_FULL_GC_INTERVAL
+        self._openvino_last_reinit = 0.0  # 上次 OpenVINO 重初始化的时间戳
 
     def _maybe_collect_garbage(self):
         """在长时间 OCR 循环下定期触发 full GC，优先压低峰值内存。
@@ -53,6 +74,49 @@ class OCR:
         if self.ocr_count % self._periodic_gc_interval == 0:
             gc.collect()
 
+    def _is_memory_low(self, threshold_gb: float = 2.0) -> bool:
+        """检查当前可用物理内存是否低于阈值（默认 2GB）。"""
+        try:
+            import psutil
+            available_gb = psutil.virtual_memory().available / (1024 ** 3)
+            if available_gb < threshold_gb:
+                self.logger.warning(f"可用物理内存不足：{available_gb:.2f} GB < {threshold_gb} GB")
+                return True
+            return False
+        except Exception as e:
+            self.logger.warning(f"检查内存失败：{e}")
+            return False
+
+    def _maybe_fallback_openvino_due_to_memory(self):
+        """若当前使用 OpenVINO 且可用物理内存不足 2GB，立即降级到 ONNXRuntime(CPU)。"""
+        if not self._using_openvino or self._openvino_fallback:
+            return
+        if self._is_memory_low():
+            self.logger.warning("可用内存不足，正在从 OpenVINO 降级到 ONNXRuntime(CPU)...")
+            self.exit_ocr()
+            self.instance_ocr(force_onnx=True)
+            self.logger.info("已因内存不足切换到 ONNXRuntime(CPU) 模式")
+
+    def _maybe_reinit_openvino(self):
+        """若当前使用 OpenVINO 且距上次（重）初始化已超过阈值，则重新初始化以释放内存。
+
+        OpenVINO 推理引擎存在内存持续增长问题，定期销毁并重建实例是目前
+        最直接的缓解手段。重初始化期间不影响当前正在处理的识别结果。
+        """
+        if not self._using_openvino or self._openvino_fallback:
+            return
+        now = time.monotonic()
+        if self._openvino_last_reinit == 0.0:
+            # 首次记录初始化时间，不立即重建
+            self._openvino_last_reinit = now
+            return
+        if now - self._openvino_last_reinit >= OCR_OPENVINO_REINIT_INTERVAL:
+            self.logger.info("OpenVINO 内存回收：正在重新初始化 OCR 实例...")
+            self.exit_ocr()
+            self.instance_ocr()
+            self._openvino_last_reinit = time.monotonic()
+            self.logger.info("OpenVINO OCR 实例已重新初始化")
+
     def _get_config(self):
         """延迟获取配置对象，避免循环导入"""
         if self._cfg is None:
@@ -63,25 +127,45 @@ class OCR:
                 self.logger.warning(f"获取配置失败：{e}，将使用默认设置")
         return self._cfg
 
-    def _is_gpu_acceleration_enabled(self) -> bool:
-        """检查配置中是否启用 GPU 加速"""
+    def _get_selected_mode(self) -> str:
+        """读取 OCR 模式配置，并兼容旧版布尔值。"""
         cfg = self._get_config()
         if cfg is not None:
             try:
-                return cfg.ocr_gpu_acceleration
+                value = cfg.ocr_gpu_acceleration
+                if isinstance(value, bool):
+                    return OCR_MODE_AUTO if value else OCR_MODE_CPU
+                if isinstance(value, str) and value in OCR_MODE_CHOICES:
+                    return value
             except Exception:
                 pass
-        return True  # 默认启用
+        return OCR_MODE_AUTO
 
-    def _disable_gpu_acceleration(self):
-        """禁用 GPU 加速并保存配置"""
+    def _set_mode(self, mode: str):
+        """写入 OCR 模式配置。"""
         cfg = self._get_config()
         if cfg is not None:
             try:
-                cfg.set_value("ocr_gpu_acceleration", False)
-                self.logger.info("已自动禁用 OCR GPU 加速配置")
+                cfg.set_value("ocr_gpu_acceleration", mode)
             except Exception as e:
                 self.logger.warning(f"保存配置失败：{e}")
+
+    def _disable_gpu_acceleration(self):
+        """禁用 GPU 加速；仅在自动模式时写回 CPU 模式。"""
+        cfg = self._get_config()
+        raw_mode = None
+        if cfg is not None:
+            try:
+                raw_mode = cfg.get_value("ocr_gpu_acceleration", OCR_MODE_AUTO)
+            except Exception:
+                raw_mode = None
+
+        should_persist = (raw_mode == OCR_MODE_AUTO) or (raw_mode is True)
+        if should_persist:
+            self._set_mode(OCR_MODE_CPU)
+            self.logger.info("已自动切换 OCR 加速模式为 CPU")
+        else:
+            self.logger.info("已降级到 CPU 模式")
 
     def _check_windows_version(self):
         """检查是否为 Windows 10 Build 18362 及以上"""
@@ -105,6 +189,68 @@ class OCR:
             return True
         return False
 
+    def _resolve_engine(self, selected_mode, force_cpu=False, force_onnx=False):
+        """根据配置模式和运行环境解析实际引擎与 DML 开关。"""
+        from rapidocr import EngineType
+        import importlib.util
+
+        windows_supported = self._check_windows_version()
+        has_onnxruntime = importlib.util.find_spec("onnxruntime") is not None
+        has_openvino = importlib.util.find_spec("openvino") is not None
+
+        effective_mode = selected_mode
+        if force_cpu:
+            effective_mode = OCR_MODE_CPU
+        if force_onnx:
+            effective_mode = OCR_MODE_ONNX_CPU
+
+        prefer_engine = EngineType.ONNXRUNTIME
+        use_dml = False
+
+        if effective_mode == OCR_MODE_AUTO:
+            if windows_supported and has_onnxruntime:
+                use_dml = True
+                prefer_engine = EngineType.ONNXRUNTIME
+            elif has_openvino:
+                prefer_engine = EngineType.OPENVINO
+            else:
+                prefer_engine = EngineType.ONNXRUNTIME
+        elif effective_mode in (OCR_MODE_GPU, OCR_MODE_ONNX_DML):
+            if windows_supported and has_onnxruntime:
+                use_dml = True
+                prefer_engine = EngineType.ONNXRUNTIME
+            else:
+                self.logger.warning("当前环境不支持 ONNXRuntime(DirectML)，已回退到 CPU 模式")
+                effective_mode = OCR_MODE_CPU if effective_mode == OCR_MODE_GPU else OCR_MODE_ONNX_CPU
+                if effective_mode == OCR_MODE_CPU and has_openvino:
+                    prefer_engine = EngineType.OPENVINO
+                else:
+                    prefer_engine = EngineType.ONNXRUNTIME
+        elif effective_mode == OCR_MODE_CPU:
+            if has_openvino:
+                prefer_engine = EngineType.OPENVINO
+            else:
+                prefer_engine = EngineType.ONNXRUNTIME
+        elif effective_mode == OCR_MODE_OPENVINO_CPU:
+            if has_openvino:
+                prefer_engine = EngineType.OPENVINO
+            else:
+                self.logger.warning("未检测到 OpenVINO，已回退到 ONNXRuntime(CPU)")
+                prefer_engine = EngineType.ONNXRUNTIME
+                effective_mode = OCR_MODE_ONNX_CPU
+        elif effective_mode == OCR_MODE_ONNX_CPU:
+            prefer_engine = EngineType.ONNXRUNTIME
+        else:
+            self.logger.warning(f"未知 OCR 模式 {effective_mode}，已回退为自动模式")
+            effective_mode = OCR_MODE_AUTO
+            if windows_supported and has_onnxruntime:
+                use_dml = True
+                prefer_engine = EngineType.ONNXRUNTIME
+            elif has_openvino:
+                prefer_engine = EngineType.OPENVINO
+
+        return prefer_engine, use_dml, effective_mode
+
     def instance_ocr(self, log_level: str = "error", force_cpu: bool = False, force_onnx: bool = False):
         """实例化OCR，若ocr实例未创建，则创建之"""
         if self.ocr is None:
@@ -112,31 +258,24 @@ class OCR:
                 self.logger.debug("开始初始化OCR...")
                 start_time = time.monotonic()
                 from rapidocr import EngineType, LangDet, ModelType, OCRVersion, RapidOCR
+                self._selected_mode = self._get_selected_mode()
+                prefer_engine, use_dml, resolved_mode = self._resolve_engine(
+                    self._selected_mode,
+                    force_cpu=force_cpu,
+                    force_onnx=force_onnx,
+                )
+                self._resolved_mode = resolved_mode
+
                 if force_cpu:
-                    use_dml = False
                     self._dml_fallback = True
                     self.logger.warning("强制使用 CPU 模式初始化 OCR")
-                else:
-                    # 检查配置和 Windows 版本
-                    gpu_enabled = self._is_gpu_acceleration_enabled()
-                    windows_supported = self._check_windows_version()
-                    use_dml = gpu_enabled and windows_supported
-                    if not gpu_enabled:
-                        self.logger.debug("配置中已禁用 OCR GPU 加速")
-                self._use_dml = use_dml
-                self.logger.debug(f"DML 支持：{'启用' if use_dml else '禁用'}")
-
-                import importlib.util
-                prefer_engine = EngineType.ONNXRUNTIME
-                if force_cpu or not use_dml or importlib.util.find_spec("onnxruntime") is None:
-                    if importlib.util.find_spec("openvino") is not None:
-                        prefer_engine = EngineType.OPENVINO
-                        self.logger.debug("优先使用 OpenVINO")
-
                 if force_onnx:
-                    prefer_engine = EngineType.ONNXRUNTIME
                     self._openvino_fallback = True
-                    self.logger.warning("强制使用 ONNXRuntime 引擎初始化 OCR")
+                    self.logger.warning("强制使用 ONNXRuntime(CPU) 初始化 OCR")
+
+                self._use_dml = use_dml
+                self.logger.debug(f"OCR 模式：配置={self._selected_mode}，生效={self._resolved_mode}")
+                self.logger.debug(f"DML 支持：{'启用' if use_dml else '禁用'}")
 
                 self._using_openvino = (prefer_engine == EngineType.OPENVINO)
 
@@ -173,6 +312,7 @@ class OCR:
                     if prefer_engine == EngineType.OPENVINO:
                         self.logger.debug(f"使用引擎 OpenVINO 初始化 OCR 失败: {e_engine}")
                         prefer_engine = EngineType.ONNXRUNTIME
+                        self._resolved_mode = OCR_MODE_ONNX_CPU
                         self.logger.debug(f"尝试回退到 ONNXRuntime 并重新初始化 OCR")
                         params["Det.engine_type"] = prefer_engine
                         params["Cls.engine_type"] = prefer_engine
@@ -184,6 +324,10 @@ class OCR:
                 self.logger.debug("初始化OCR完成")
                 elapsed_time = time.monotonic() - start_time
                 self.logger.debug(f"OCR初始化耗时: {elapsed_time:.2f} 秒")
+                if self._using_openvino:
+                    self._openvino_last_reinit = time.monotonic()
+                    # 初始化后立即检查可用内存，不足 2GB 则降级
+                    self._maybe_fallback_openvino_due_to_memory()
                 atexit.register(self.exit_ocr)
             except Exception as e:
                 self.logger.error(f"初始化OCR失败：{e}")
@@ -261,6 +405,10 @@ class OCR:
                     # 成功路径最适合触发周期性回收：此时本轮 OCR 的业务处理已经完成，
                     # 主流程通常不会再需要 RapidOCR 生成的中间对象，可以优先压低峰值。
                     self._maybe_collect_garbage()
+                    # OpenVINO 存在内存泄漏，定期重新初始化以释放内存
+                    self._maybe_reinit_openvino()
+                    # OpenVINO 执行后检查可用内存，不足 2GB 则降级
+                    self._maybe_fallback_openvino_due_to_memory()
                     return results
                 except Exception as e:
                     # 检查是否为编码错误（直接或通过异常链）

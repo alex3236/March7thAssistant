@@ -284,6 +284,16 @@ class SettingInterface(ScrollArea):
             tr("启用培养目标"),
             tr("根据培养目标刷取行迹与遗器副本，如果无法获取培养目标则回退到默认的副本设置")
         )
+        self.buildTargetSchemeCard = ComboBoxSettingCard2(
+            "build_target_scheme",
+            FIF.SEARCH,
+            tr("识别方案"),
+            tr("副本名称识别会进入挑战页读取副本信息；掉落物识别根据列表中的掉落物匹配副本，异常时可尝试切换方案"),
+            texts={
+                tr("副本名称识别"): "instance",
+                tr("掉落物识别"): "drop"
+            }
+        )
         self.buildTargetPlanarOrnamentWeeklyCountCard = RangeSettingCard1(
             "build_target_ornament_weekly_count",
             [0, 7],
@@ -506,7 +516,7 @@ class SettingInterface(ScrollArea):
             FIF.HISTORY,
             tr('职级难度'),
             '',
-            texts={tr('最低职级'): 'lowest', tr('最高职级'): 'highest'}
+            texts={tr('最高职级'): 'highest', tr('当前职级'): 'current', tr('最低职级'): 'lowest'}
         )
         self.currencywarsStrategyCard = ExpandableComboBoxSettingCard(
             "currencywars_strategy",
@@ -734,7 +744,7 @@ class SettingInterface(ScrollArea):
             FIF.GLOBE,
             tr('优先星球'),
             '',
-            texts={tr("不配置"): "0", tr("空间站"): "1", tr("雅利洛"): "2", tr("仙舟"): "3", tr("匹诺康尼"): "4", tr("翁法罗斯"): 5}
+            texts={tr("不配置"): "0", tr("空间站"): "1", tr("雅利洛"): "2", tr("仙舟"): "3", tr("匹诺康尼"): "4", tr("翁法罗斯"): 5, tr("二相乐园"): 6}
         )
 
         self.ImmortalGameGroup = SettingCardGroup(tr("逐光捡金"), self.scrollWidget)
@@ -977,7 +987,8 @@ class SettingInterface(ScrollArea):
             FIF.POWER_BUTTON,
             tr('任务完成后'),
             tr('“退出”指退出游戏，不再建议使用循环模式，请改用日志界面的定时运行功能'),
-            texts={tr('无'): 'None', tr('退出'): 'Exit', tr('关机'): 'Shutdown', tr('睡眠'): 'Sleep', tr('休眠'): 'Hibernate', tr('重启'): 'Restart', tr('注销'): 'Logoff', tr('关闭显示器'): 'TurnOffDisplay', tr('运行脚本'): 'RunScript', tr('循环'): 'Loop'}
+            texts={tr('无'): 'None', tr('退出'): 'Exit', tr('关机'): 'Shutdown', tr('睡眠'): 'Sleep', tr('休眠'): 'Hibernate', tr('重启')
+                      : 'Restart', tr('注销'): 'Logoff', tr('关闭显示器'): 'TurnOffDisplay', tr('运行脚本'): 'RunScript', tr('循环'): 'Loop'}
         )
         self.loopModeCard = ComboBoxSettingCard2(
             "loop_mode",
@@ -1358,11 +1369,19 @@ class SettingInterface(ScrollArea):
             tr("游戏启动前通过修改注册表或本地存储开启自动战斗和二倍速，并在清体力、货币战争和逐光捡金场景中检测并保持自动战斗状态"),
             "auto_battle_detect_enable"
         )
-        self.ocrGpuAccelerationCard = SwitchSettingCard1(
+        self.ocrGpuAccelerationCard = ComboBoxSettingCard2(
+            "ocr_gpu_acceleration",
             FIF.SPEED_HIGH,
-            tr('启用 OCR GPU 加速'),
-            tr("使用 DirectML 加速 OCR 识别，若 GPU 负载高导致 OCR 过慢会自动关闭（仅 Windows 10 Build 18362 及以上支持）"),
-            "ocr_gpu_acceleration"
+            tr('OCR 加速模式'),
+            tr("设置 OCR 引擎与加速后端。自动模式会优先尝试 DirectML，若不可用则回退到 CPU 引擎。"),
+            texts={
+                tr('自动'): 'auto',
+                tr('GPU'): 'gpu',
+                tr('ONNXRuntime（DirectML）'): 'onnx_dml',
+                tr('CPU'): 'cpu',
+                tr('OpenVINO（CPU）'): 'openvino_cpu',
+                tr('ONNXRuntime（CPU）'): 'onnx_cpu',
+            }
         )
         self.autoSetResolutionEnableCard = SwitchSettingCard1(
             FIF.FULL_SCREEN,
@@ -1519,6 +1538,7 @@ class SettingInterface(ScrollArea):
         # self.PowerGroup.addSettingCard(self.maxCalyxPerRoundNumOfAttempts)
         self.PowerGroup.addSettingCard(self.buildTargetEnableCard)
         self.buildTargetEnableCard.addSettingCards([
+            self.buildTargetSchemeCard,
             self.buildTargetPlanarOrnamentWeeklyCountCard
         ])
         self.PowerGroup.addSettingCard(self.echoofwarEnableCard)
