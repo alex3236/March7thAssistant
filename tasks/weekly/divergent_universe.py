@@ -47,6 +47,13 @@ class DivergentUniverse:
         检查差分宇宙积分，达到 14000 时记录时间戳
         """
         screen.wait_for_screen_change("divergent_main")
+
+        # 4.2版本周期积分将合并。本期积分奖励已由邮件发放。
+        if auto.find_element("奖励已由邮件发放", "text", crop=(33 / 1920, 911 / 1080, 397 / 1920, 103 / 1080), include=True):
+            log.info("检测到积分奖励已由邮件发放，跳过积分检查")
+            cfg.save_timestamp("weekly_divergent_timestamp")
+            return True
+
         score_pos = (182 / 1920, 977 / 1080, 209 / 1920, 43 / 1080)
         score = auto.get_single_line_text(score_pos)
         if not score:
@@ -1008,18 +1015,42 @@ class DivergentUniverse:
     def process_mask(self):
         """
         处理欢愉假面界面：默认选择中间的面具"""
+        mask_crop = (396 / 1920, 519 / 1080, 172 / 1920, 485 / 1080)
         mask_positions = [
             (408 / 1920, 529 / 1080, 147 / 1920, 48 / 1080),
             (411 / 1920, 713 / 1080, 144 / 1920, 50 / 1080),
             (413 / 1920, 900 / 1080, 142 / 1920, 51 / 1080),
         ]
+        mask_names = []
         if auto.click_element(("选择一张面具", "确定"), 'text'):
             if auto.matched_text == "选择一张面具":
-                # for pos in mask_positions:
-                #     if auto.click_element(("战车面具", "斗士面具"), "text", crop=pos):
-                #         log.info(f"检测到{auto.matched_text}，优先选择")
-                #         time.sleep(2)
-                #         return
+                if auto.find_element("面具", "text", crop=mask_crop, include=True):
+                    for box in auto.ocr_result:
+                        text = box[1][0]
+                        if text.endswith("面具") and len(text) > 2:
+                            log.info(f"检测到面具：{text}")
+                            mask_names.append(text)
+                    if any(mask_names):
+                        for name in mask_names:
+                            log.info(f"尝试选择面具：{name}")
+                            if auto.click_element(name, "text", crop=mask_crop, include=True):
+                                time.sleep(2)
+                                return
+
+                # for i, pos in enumerate(mask_positions):
+                #     result = auto.get_single_line_text(crop=pos)
+                #     if result and result.endswith("面具") and len(result) > 2:
+                #         log.info(f"检测到第 {i + 1} 张面具：{result}")
+                #         has_mask[i] = True
+
+                # if any(has_mask):
+                #     for i, has in enumerate(has_mask):
+                #         if has:
+                #             log.info(f"尝试选择第 {i + 1} 张面具")
+                #             auto.click_element(mask_positions[i], 'crop')
+                #             time.sleep(2)
+                #             return
+
                 log.info("默认选择中间的面具")
                 auto.click_element(mask_positions[1], 'crop')
                 time.sleep(2)
