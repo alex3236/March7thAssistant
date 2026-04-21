@@ -301,6 +301,12 @@ class SettingInterface(ScrollArea):
             tr("每周饰品提取次数"),
             tr("目标有足够资源后，执行饰品提取的次数，其余时间执行侵蚀隧洞"),
         )
+        self.buildTargetUseUserInstanceWhenOnlyErosionAndOrnamentCard = SwitchSettingCard1(
+            FIF.SYNC,
+            tr("仅识别到侵蚀隧洞/饰品提取时使用自定义副本"),
+            tr("开启后，当培养目标仅包含侵蚀隧洞和饰品提取时，清体力将改用你在体力设置中配置的副本"),
+            "build_target_use_user_instance_when_only_erosion_and_ornament"
+        )
         self.echoofwarEnableCard = ExpandableSwitchSettingCardEchoofwar(
             "echo_of_war_enable",
             FIF.MEGAPHONE,
@@ -725,12 +731,19 @@ class SettingInterface(ScrollArea):
             tr("上次运行锄大地的时间"),
             "fight_timestamp"
         )
-        self.fightAllowMapBuyCard = ComboBoxSettingCard2(
-            "fight_allow_map_buy",
+        self.fightMapVersionCard = ComboBoxSettingCard2(
+            "fight_map_version",
             FIF.GLOBE,
-            tr('购买代币与过期邮包'),
+            tr('地图版本'),
             '',
-            texts={tr("不配置"): "不配置", tr("启用"): True, tr("停用"): False}
+            texts={tr("不配置"): "不配置", tr("默认（疾跑）"): "default", tr("黄泉专用"): "HuangQuan"}
+        )
+        self.fightMainMapCard = ComboBoxSettingCard2(
+            "fight_main_map",
+            FIF.GLOBE,
+            tr('优先星球'),
+            '',
+            texts={tr("不配置"): "0", tr("空间站"): "1", tr("雅利洛"): "2", tr("仙舟"): "3", tr("匹诺康尼"): "4", tr("翁法罗斯"): 5, tr("二相乐园"): 6}
         )
         self.fightAllowSnackBuyCard = ComboBoxSettingCard2(
             "fight_allow_snack_buy",
@@ -739,12 +752,12 @@ class SettingInterface(ScrollArea):
             '',
             texts={tr("不配置"): "不配置", tr("启用"): True, tr("停用"): False}
         )
-        self.fightMainMapCard = ComboBoxSettingCard2(
-            "fight_main_map",
+        self.fightAllowMapBuyCard = ComboBoxSettingCard2(
+            "fight_allow_map_buy",
             FIF.GLOBE,
-            tr('优先星球'),
+            tr('购买代币与过期邮包'),
             '',
-            texts={tr("不配置"): "0", tr("空间站"): "1", tr("雅利洛"): "2", tr("仙舟"): "3", tr("匹诺康尼"): "4", tr("翁法罗斯"): 5, tr("二相乐园"): 6}
+            texts={tr("不配置"): "不配置", tr("启用"): True, tr("停用"): False}
         )
 
         self.ImmortalGameGroup = SettingCardGroup(tr("逐光捡金"), self.scrollWidget)
@@ -1539,7 +1552,8 @@ class SettingInterface(ScrollArea):
         self.PowerGroup.addSettingCard(self.buildTargetEnableCard)
         self.buildTargetEnableCard.addSettingCards([
             self.buildTargetSchemeCard,
-            self.buildTargetPlanarOrnamentWeeklyCountCard
+            self.buildTargetPlanarOrnamentWeeklyCountCard,
+            self.buildTargetUseUserInstanceWhenOnlyErosionAndOrnamentCard
         ])
         self.PowerGroup.addSettingCard(self.echoofwarEnableCard)
         self.echoofwarEnableCard.addSettingCards([
@@ -1632,9 +1646,10 @@ class SettingInterface(ScrollArea):
         ])
         self.FightGroup.addSettingCard(self.fightTeamEnableCard)
         # self.FightGroup.addSettingCard(self.fightTeamNumberCard)
-        self.FightGroup.addSettingCard(self.fightAllowMapBuyCard)
-        self.FightGroup.addSettingCard(self.fightAllowSnackBuyCard)
+        self.FightGroup.addSettingCard(self.fightMapVersionCard)
         self.FightGroup.addSettingCard(self.fightMainMapCard)
+        self.FightGroup.addSettingCard(self.fightAllowSnackBuyCard)
+        self.FightGroup.addSettingCard(self.fightAllowMapBuyCard)
 
         self.ImmortalGameGroup.addSettingCard(self.forgottenhallEnableCard)
         self.forgottenhallEnableCard.addSettingCards([

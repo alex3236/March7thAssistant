@@ -1,7 +1,7 @@
 # coding:utf-8
 from collections import deque
 
-from PySide6.QtCore import Qt, QProcess, QProcessEnvironment, Signal, QTimer, QTime, QDateTime, QEvent
+from PySide6.QtCore import Qt, QProcess, QProcessEnvironment, Signal, QTimer, QTime, QDateTime, QEvent, QMetaObject, Slot
 from PySide6.QtGui import QFont, QTextCursor
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
                                QSizePolicy, QFrame, QLabel)
@@ -26,6 +26,7 @@ import shlex
 import threading
 import subprocess as sp
 import ctypes
+import time
 
 if sys.platform == 'win32':
     import keyboard
@@ -97,6 +98,11 @@ class GameLogOverlay(QWidget):
                 color: rgba(244, 247, 252, 235);
                 background-color: transparent;
             }
+            QLabel#gameLogOverlayHotkey {
+                color: rgba(255, 244, 250, 240);
+                font-size: 12px;
+                background-color: transparent;
+            }
         """)
 
         panelLayout = QVBoxLayout(self.panel)
@@ -107,16 +113,22 @@ class GameLogOverlay(QWidget):
         headerLayout.setContentsMargins(0, 0, 0, 0)
         headerLayout.setSpacing(8)
 
-        self.titleLabel = QLabel(f'任务日志 {cfg.version}', self.panel)
+        self.titleLabel = QLabel(f'任务日志', self.panel)
         self.titleLabel.setObjectName('gameLogOverlayTitle')
 
-        self.liveBadge = QLabel('LIVE', self.panel)
+        self.liveBadge = QLabel(cfg.version, self.panel)
         self.liveBadge.setObjectName('gameLogOverlayBadge')
         self.liveBadge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        hotkey = cfg.get_value('hotkey_stop_task', 'F10').upper()
+        self.hotkeyLabel = QLabel(f'按下 {hotkey} 停止任务', self.panel)
+        self.hotkeyLabel.setObjectName('gameLogOverlayHotkey')
+        self.hotkeyLabel.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         headerLayout.addWidget(self.titleLabel)
         headerLayout.addWidget(self.liveBadge)
         headerLayout.addStretch()
+        headerLayout.addWidget(self.hotkeyLabel)
 
         self.logLabel = QLabel('', self.panel)
         self.logLabel.setObjectName('gameLogOverlayBody')
@@ -239,8 +251,15 @@ class LogInterface(ScrollArea):
         super().__init__(parent=parent)
         self.process = None
         self.current_task = None
+        # 清理日志中的 ANSI 控制序列，兼容标准 ESC 序列与缺失 ESC 的残留序列（如 [36m）
+        self._ansi_escape_re = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+        self._orphan_ansi_re = re.compile(r'(?<!\x1b)\[(?:\d{1,3}(?:;\d{1,3})*)?[A-Za-z]')
         self._hotkey_registered = False
         self._current_hotkey = None
+        self._hotkey_handler = None
+        self._parsed_hotkey_groups = []
+        self._hotkey_trigger_key = None
+        self._last_hotkey_trigger_ts = 0.0
         # 当前运行的定时任务元数据（如果是由定时触发），在进程结束时用于发送通知与执行后续操作
         self._pending_task_meta = None
         # 用于在强制停止当前任务后排队延迟启动的任务（tuple: (task_meta, task_dict)）
@@ -276,12 +295,12 @@ class LogInterface(ScrollArea):
         self.vBoxLayout = QVBoxLayout(self.scrollWidget)
 
         self.__initWidget()
-        self.__initShortcut()
 
         # 连接停止任务信号
         self.stopTaskRequested.connect(lambda: self.stopTask(user_initiated=True))
         # 线程安全日志信号连接（用于从后台线程发送日志）
         self.logMessage.connect(self.appendLog)
+        self.__initShortcut()
 
         # 在启动定时器前，迁移旧的单一定时配置（若开启且未配置新任务）
         self._migrate_legacy_schedule()
@@ -505,29 +524,118 @@ class LogInterface(ScrollArea):
 
             try:
                 hotkey = cfg.get_value("hotkey_stop_task", "f10")
-                keyboard.add_hotkey(hotkey, self._onGlobalHotkeyPressed)
+                parsed_groups, trigger_key = self._parseHotkeyForHook(hotkey)
+                if not parsed_groups or not trigger_key:
+                    raise ValueError(f"无法解析热键: {hotkey}")
+
+                self._parsed_hotkey_groups = parsed_groups
+                self._hotkey_trigger_key = trigger_key
+                self._hotkey_handler = keyboard.on_press_key(trigger_key, self._onGlobalHotkeyEvent, suppress=False)
                 self._hotkey_registered = True
                 self._current_hotkey = hotkey
             except Exception as e:
                 print(f"注册全局热键失败: {e}")
                 self._hotkey_registered = False
+                self._hotkey_handler = None
+                self._parsed_hotkey_groups = []
+                self._hotkey_trigger_key = None
 
     def _unregisterGlobalHotkey(self):
         """取消注册全局热键"""
         if sys.platform == 'win32':
-            if self._hotkey_registered and self._current_hotkey:
+            if self._hotkey_registered and self._hotkey_handler is not None:
                 try:
-                    keyboard.remove_hotkey(self._current_hotkey)
+                    keyboard.unhook(self._hotkey_handler)
                 except Exception as e:
                     # 忽略注销热键时的异常，但打印日志以便排查问题
                     print(f"取消注册全局热键失败: {e}")
                 self._hotkey_registered = False
                 self._current_hotkey = None
+                self._hotkey_handler = None
+                self._parsed_hotkey_groups = []
+                self._hotkey_trigger_key = None
+
+    def _parseHotkeyForHook(self, hotkey: str):
+        """解析热键为按键组，并返回建议绑定的触发键。"""
+        hotkey_text = str(hotkey or '').strip().lower()
+        if not hotkey_text:
+            return [], None
+
+        # keyboard 库允许逗号表示序列热键。此处仅保留第一段，保证简单配置稳定工作。
+        first_step = hotkey_text.split(',')[0].strip()
+        parts = [p.strip() for p in first_step.split('+') if p.strip()]
+        if not parts:
+            return [], None
+
+        alias_map = {
+            'control': 'ctrl',
+            'left control': 'left ctrl',
+            'right control': 'right ctrl',
+            'alt gr': 'alt gr',
+            'return': 'enter',
+            'esc': 'escape',
+            'win': 'windows',
+            'left win': 'left windows',
+            'right win': 'right windows',
+            'command': 'windows',
+            'option': 'alt',
+            'plus': '+',
+        }
+
+        normalized = [alias_map.get(p, p) for p in parts]
+        group = set(normalized)
+
+        modifiers = {
+            'ctrl', 'left ctrl', 'right ctrl',
+            'shift', 'left shift', 'right shift',
+            'alt', 'left alt', 'right alt', 'alt gr',
+            'windows', 'left windows', 'right windows',
+        }
+        non_modifiers = [k for k in normalized if k not in modifiers]
+        trigger_key = non_modifiers[-1] if non_modifiers else normalized[-1]
+        return [group], trigger_key
+
+    def _isGroupPressed(self, group):
+        """判断按键组是否均处于按下状态。"""
+        for key_name in group:
+            try:
+                if not keyboard.is_pressed(key_name):
+                    return False
+            except Exception:
+                return False
+        return True
+
+    def _onGlobalHotkeyEvent(self, _event):
+        """按键事件回调：只要目标热键键集合被满足即可触发（允许额外按键存在）。"""
+        try:
+            if not self._parsed_hotkey_groups:
+                return
+
+            now = time.monotonic()
+            if now - self._last_hotkey_trigger_ts < 0.12:
+                return
+
+            for group in self._parsed_hotkey_groups:
+                if self._isGroupPressed(group):
+                    self._last_hotkey_trigger_ts = now
+                    self._onGlobalHotkeyPressed()
+                    return
+        except Exception:
+            # 回退：保证热键功能可用
+            self._onGlobalHotkeyPressed()
+
+    @Slot()
+    def _emitStopTaskRequestedMainThread(self):
+        self.stopTaskRequested.emit()
 
     def _onGlobalHotkeyPressed(self):
         """全局热键被按下"""
-        # 使用信号来线程安全地调用停止任务
-        self.stopTaskRequested.emit()
+        # keyboard 回调在线程中触发，通过 QueuedConnection 转发到 Qt 主线程更稳定
+        try:
+            QMetaObject.invokeMethod(self, "_emitStopTaskRequestedMainThread", Qt.ConnectionType.QueuedConnection)
+        except Exception:
+            # 回退：至少保证功能可用
+            self.stopTaskRequested.emit()
 
     def updateHotkey(self):
         """更新热键（当配置改变时调用）"""
@@ -536,6 +644,12 @@ class LogInterface(ScrollArea):
             # 更新按钮文本
             hotkey = cfg.get_value("hotkey_stop_task", "f10").upper()
             self.stopButton.setText(f"{self.tr('停止任务')} ({hotkey})")
+            # 同步更新悬浮窗的快捷键提示
+            try:
+                if self._log_overlay:
+                    self._log_overlay.hotkeyLabel.setText(f"按下 {hotkey} 停止任务")
+            except Exception:
+                pass
         else:
             self.stopButton.setText(self.tr('停止任务'))
 
@@ -1119,7 +1233,9 @@ class LogInterface(ScrollArea):
         """
         if not text:
             return
-        s = str(text)
+        s = self._strip_ansi_sequences(str(text))
+        if not s:
+            return
 
         try:
             if self._log_overlay:
@@ -1160,6 +1276,15 @@ class LogInterface(ScrollArea):
                 self._buffered_logs = (getattr(self, '_buffered_logs', '') or '') + s
             except Exception:
                 pass
+
+    def _strip_ansi_sequences(self, text: str) -> str:
+        """移除 ANSI 转义序列，避免在 GUI 文本框中显示颜色控制码。"""
+        try:
+            cleaned = self._ansi_escape_re.sub('', text)
+            cleaned = self._orphan_ansi_re.sub('', cleaned)
+            return cleaned
+        except Exception:
+            return text
 
     def _should_append_now(self):
         """判断当前是否应该立即追加日志：要求当前控件和顶层窗口都可见"""
