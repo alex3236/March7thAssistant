@@ -1306,8 +1306,11 @@ class CurrencyWars:
         log.info(f"已移动角色: {list2[i2].name}({self.zone_name_localization[z1]}({i1})) <-> {list1[i1].name}({self.zone_name_localization[z2]}({i2}))")
         self._log_character_status()
 
-        # 检查可能弹出的特殊选择框
-        time.sleep(1)
+        if cfg.currencywars_strategy == "aglaea" and (list2[i2].name in ("星期日", "花火") or list1[i1].name in ("星期日", "花火")):
+            time.sleep(4)  # 等待选择框出现
+        else:
+            # 检查可能弹出的特殊选择框
+            time.sleep(1)
         self.check_festival_star_popup()
         return True
 
@@ -1625,8 +1628,13 @@ class CurrencyWars:
             if auto.find_element("专家邀请函", "text", None, crop=(949 / 1920, 27 / 1080, 153 / 1920, 56 / 1080), include=True):
                 log.info("检测到专家邀请函选项，尝试点击")
                 success = True
-                pos = (769 / 1920, 134 / 1080, 245 / 1920, 276 / 1080)
-                auto.click_element(pos, "crop")
+                if cfg.currencywars_strategy == "aglaea" and auto.click_element("银狼", "text", crop=(366 / 1920, 363 / 1080, 1318 / 1920, 40 / 1080)):
+                    pass
+                else:
+                    # 4个
+                    auto.click_element((769 / 1920, 134 / 1080, 245 / 1920, 276 / 1080), "crop")
+                    # 5个
+                    auto.click_element((900 / 1920, 135 / 1080, 249 / 1920, 275 / 1080), "crop")
                 time.sleep(2)
             if not success:
                 log.warning("未检测到可点击的选项")
