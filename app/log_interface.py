@@ -875,9 +875,19 @@ class LogInterface(ScrollArea):
             self.appendLog(f"========== 开始任务: {name} ==========\n")
 
             proc = QProcess(self)
-            proc.setProcessChannelMode(QProcess.MergedChannels)
-            proc.readyReadStandardOutput.connect(self._onReadyRead)
-            proc.readyReadStandardError.connect(self._onReadyRead)
+            # BetterGI（.NET 应用）启动时会调用 AllocateConsole 并将继承的标准
+            # 句柄包装为同步 FileStream，与 QProcess 创建的 overlapped I/O 管道
+            # 不兼容，导致 "Handle does not support synchronous operations" 错误。
+            # 仅对 BetterGI 将标准流重定向到 NUL 以避免创建管道。
+            if os.path.basename(program).lower() == 'bettergi.exe':
+                null = QProcess.nullDevice()
+                proc.setStandardInputFile(null)
+                proc.setStandardOutputFile(null)
+                proc.setStandardErrorFile(null)
+            else:
+                proc.setProcessChannelMode(QProcess.MergedChannels)
+                proc.readyReadStandardOutput.connect(self._onReadyRead)
+                proc.readyReadStandardError.connect(self._onReadyRead)
             proc.finished.connect(self._onProcessFinished)
             proc.errorOccurred.connect(self._onProcessError)
 
@@ -1610,7 +1620,9 @@ class LogInterface(ScrollArea):
             pass
         self.appendLog(f"\n错误: {msg}\n")
         if error == QProcess.Crashed:
-            self.appendLog(f"\n可尝试关闭 “设置-杂项-启用 OCR GPU 加速” 选项后重新运行\n")
+            self.appendLog(f"\n可尝试将 “设置-杂项-OCR加速模式” 修改为 CPU 后重新运行\n")
+        elif error == QProcess.FailedToStart:
+            self.appendLog(f"\n请查看 “帮助-常见问题” 中关于杀毒软件的处理方式，必要时将小助手文件夹加入排除项/白名单\n")
         self._updateFinishedStatus(-1)
         self._hideLogOverlay()
 
