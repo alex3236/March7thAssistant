@@ -487,7 +487,7 @@ class CurrencyWars:
                 self.sell_characters()
                 if not (cfg.currencywars_strategy == "aglaea" and not self.allow_equip_weapons):
                     self.equip_weapons()
-                auto.click_element('出战', 'text', None, 10, crop=(1744.0 / 1920, 737.0 / 1080, 165.0 / 1920, 71.0 / 1080))
+                auto.click_element(('出战', '跳过'), 'text', None, 10, crop=(1740 / 1920, 709 / 1080, 177 / 1920, 80 / 1080), include=True)
                 time.sleep(2)
                 if auto.click_element("本局不再提示", "text", crop=(905 / 1920, 571 / 1080, 171 / 1920, 50 / 1080)):
                     time.sleep(1)
@@ -1333,8 +1333,8 @@ class CurrencyWars:
         log.info(f"已移动角色: {list2[i2].name}({self.zone_name_localization[z1]}({i1})) <-> {list1[i1].name}({self.zone_name_localization[z2]}({i2}))")
         self._log_character_status()
 
-        # 盛会之星羁绊角色
-        star_characters = {"星期日", "花火", "大丽花", "知更鸟", "黑天鹅"}
+        # 特殊会弹窗角色
+        star_characters = {"星期日", "花火", "大丽花", "知更鸟", "黑天鹅", "银狼LV.999"}
         if list2[i2].name in star_characters or list1[i1].name in star_characters:
             time.sleep(4)  # 等待选择框出现
         self.check_festival_star_popup()
@@ -1373,6 +1373,13 @@ class CurrencyWars:
                             break
                 auto.click_element("确认选择", "text", crop=(1329.0 / 1920, 572.0 / 1080, 332.0 / 1920, 55.0 / 1080))
                 time.sleep(0.5)
+            elif "我来当策划" in result:
+                log.info("检测到我来当策划")
+                choose_crop = (564 / 1920, 191 / 1080, 449 / 1920, 225 / 1080)
+                auto.click_element(choose_crop, "crop")
+                time.sleep(0.5)
+                auto.click_element("确认选择", "text", crop=(1424 / 1920, 573 / 1080, 134 / 1920, 51 / 1080))
+                time.sleep(0.5)
 
     def identify_current_stage(self):
         """
@@ -1398,6 +1405,14 @@ class CurrencyWars:
         """
         收集奖励：模拟连续滑动，经过所有奖励图标
         """
+
+        # 通过颜色快速判断一下是否存在奖励可领取（避免每次都滑动一遍）
+        if auto.is_rgb_ratio_above_threshold((1306 / 1920, 154 / 1080, 285 / 1920, 329 / 1080), (66, 72, 185), 0.8, tolerance=0.085):
+            log.info("没有检测到可领取的奖励，跳过滑动")
+            return
+        else:
+            log.info("检测到存在可领取的奖励，开始滑动收集")
+
         reward_pos = [
             (1564 / 1920, 138 / 1080, 26 / 1920, 20 / 1080),
             (1289 / 1920, 138 / 1080, 26 / 1920, 20 / 1080),
@@ -1993,8 +2008,9 @@ class CurrencyWars:
             # 独家代言：从3件进阶装备中选择一件获取。本局游戏中，你获得组成该装备的简易装备时，改为获得该进阶装备。
             # 全都要：本局游戏中，补给阶段的可选项减少2个。补给阶段选择后，额外获得所有未选择的角色及装备。
             # 广聚天下英才：获得所有2费角色各一个
+            # 阿哈大悦：【目前 Wiki 都还没更新这个】
 
-            black_list = ('深井角斗场', '佩佩客串', '钻石商人', '现金为王', '降本增效', '大裁员', '人力重组', '全员晋升', '节省工位', '奋斗协议', '专家研讨会', '快请专家', '英雄登场', '命运礼物', '独家代言', '全都要', '广聚天下英才')
+            black_list = ('深井角斗场', '佩佩客串', '钻石商人', '现金为王', '降本增效', '大裁员', '人力重组', '全员晋升', '节省工位', '奋斗协议', '专家研讨会', '快请专家', '英雄登场', '命运礼物', '独家代言', '全都要', '广聚天下英才', '阿哈大悦')
             if not has_choose:
                 for pos in button_positions:
                     if auto.find_element(black_list, 'text', crop=pos, include=True):
