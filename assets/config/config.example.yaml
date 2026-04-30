@@ -9,6 +9,9 @@ log_level: INFO # 日志等级，可选值：INFO, DEBUG。INFO 仅记录重要�
 log_retention_days: 30 # 日志保留天数，超过此天数的日志文件将被自动删除。
 log_overlay_enable: true # 是否在游戏界面上显示实时日志浮窗（仅 Windows）。
 
+# 调试模式
+debug_mode_enable: false # 是否启用调试模式。开启后会在屏幕对应位置实时绘制检测范围框（透明悬浮窗），用于调试自动化识别。仅 Windows 生效。
+
 # 更新检查
 check_update: true # 是否检查更新。true 检查，false 不检查。
 
@@ -365,6 +368,7 @@ script_path: C:\Path\to\your\Script.bat
 hotkey_technique: e # 设置游戏内使用秘技的按键。
 hotkey_map: m # 设置打开地图的按键。
 hotkey_warp: f3 # 设置打开跃迁的按键。
+hotkey_auto_battle: v # 设置自动战斗的按键。
 
 # 图形界面快捷键设置
 hotkey_stop_task: f10 # 设置停止任务的全局快捷键（支持后台）。
