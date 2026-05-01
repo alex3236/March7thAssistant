@@ -231,6 +231,10 @@ universe_path: .\3rdparty\Auto_Simulated_Universe # 模拟宇宙路径，指向�
 universe_timeout: 20 # 模拟宇宙超时时间（单位：小时），设置脚本或程序的最长运行时间。
 universe_requirements: false # 是否已安装模拟宇宙依赖。true 表示已安装，false 表示未安装或需要重新安装。
 universe_timestamp: 0 # 上次运行模拟宇宙的时间戳，用于记录和控制运行频率。
+divergent_universe_daily_completed_count: 0 # 当日成功通关差分宇宙的次数，任何方式运行并成功通关都会记录此值。
+divergent_universe_daily_completed_timestamp: 0 # 上次更新差分宇宙每日计数的时间戳，用于在次日刷新后自动重置次数。
+divergent_universe_weekly_completed_count: 0 # 当周成功通关差分宇宙的次数，任何方式运行并成功通关都会记录此值。
+divergent_universe_weekly_completed_timestamp: 0 # 上次更新差分宇宙每周计数的时间戳，用于在周刷新后自动重置次数。
 divergent_type: normal # 差分宇宙模式，可选值："normal"（常规演算）或 "cycle"（周期演算）。
 divergent_team_type: 终结技 # 差分宇宙队伍类型，可选值：追击/dot/终结技/击破/盾反
 universe_fate: 不配置 # 模拟宇宙使用的命途
@@ -396,6 +400,9 @@ scheduled_run_time: "04:00" # 旧配置：单一定时运行时间（仅用于�
 # 定时任务冲突处理：当计划任务触发且当前已有任务在运行时的处理策略
 # 可选值：skip（跳过需要运行的任务），stop（停止正在运行的任务并启动计划任务）
 scheduled_on_conflict: skip
+# 链式任务失败后是否继续执行后续任务
+# true：继续执行后续任务，false：停止执行后续任务
+scheduled_chain_continue_on_failure: true
 scheduled_tasks: [] # 示例：
 # scheduled_tasks:
 #   - id: "0001-..."
