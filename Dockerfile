@@ -1,4 +1,6 @@
-FROM python:3.13.11-slim-trixie
+# 使用 3.13 而非 3.14，因为 openvino 尚未提供 3.14 的 wheels
+# 等待 https://github.com/openvinotoolkit/openvino/issues/34802 解决后再升级
+FROM python:3.13.13-slim-bookworm
 
 # ======================
 # Build args (architecture)
@@ -86,7 +88,7 @@ RUN \
 # ======================
 # Python deps
 # ======================
-COPY --from=ghcr.io/astral-sh/uv:0.11.7 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.11.15 /uv /uvx /bin/
 RUN uv sync --only-group docker
     # 如果需要使用国内源，可以取消下面一行的注释
     # RUN uv sync --only-group docker --index-url https://mirrors.cloud.tencent.com/pypi/simple/
