@@ -62,6 +62,11 @@ jobs:
           Copy-Item -Path ".\README.md" -Destination ".\dist\March7thAssistant\" -Force
 
       # 创建更新压缩包
+      # 注意：不要把下面的压缩/下载步骤改成并行。7za 是 CPU 密集型，windows-latest 仅 4 核，
+      # 多进程压缩会互相抢核，实测反而更慢，不需要再尝试。
+      # 2026-09-23 实测（run 35881339484）：
+      #   - full.zip 与 full.7z 并行：309s → 363s（+54s）。zip 53s→127.5s，7z 256s→363.3s。
+      #   - update.7z 与 3rdparty 下载并行：零收益。zip 解压抢核抵消了等待时间（127s+25s ≈ 144s vs 143.9s）。
       - name: Create archive
         if: startsWith(github.ref, 'refs/tags/')
         run: |
