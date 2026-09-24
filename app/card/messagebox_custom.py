@@ -600,7 +600,7 @@ class MessageBoxInstance(MessageBox):
             # 检查输入是否匹配任一有效选项
             if input_text not in valid_options:
                 InfoBar.error(
-                    title='输入错误',
+                    title=tr('输入错误'),
                     content=tr('"{type}"的输入"{input_text}"不在可选项中，请重新选择').format(type=type, input_text=input_text),
                     orient=Qt.Horizontal,
                     isClosable=True,
@@ -772,7 +772,7 @@ class MessageBoxTeam(MessageBox):
             # 将 titleLabel 与两个下拉框放在同一行
             horizontalLayout = QHBoxLayout()
 
-            titleLabel = QLabel(tr("{}号位").format(i), parent)
+            titleLabel = QLabel(tr("{index}号位").format(index=i), parent)
             titleLabel.setFont(font)
             # titleLabel.setMinimumWidth(60)
             titleLabel.setAlignment(Qt.AlignmentFlag.AlignVCenter)
@@ -810,7 +810,7 @@ class MessageBoxTeam(MessageBox):
 
             if char_text not in valid_chars:
                 InfoBar.error(
-                    title='输入错误',
+                    title=tr('输入错误'),
                     content=tr('第{i}号位角色"{char_text}"不在可选项中，请重新选择').format(i=i, char_text=char_text),
                     orient=Qt.Horizontal,
                     isClosable=True,
@@ -822,7 +822,7 @@ class MessageBoxTeam(MessageBox):
 
             if tech_text not in valid_techs:
                 InfoBar.error(
-                    title='输入错误',
+                    title=tr('输入错误'),
                     content=tr('第{i}号位秘技"{tech_text}"不在可选项中，请重新选择').format(i=i, tech_text=tech_text),
                     orient=Qt.Horizontal,
                     isClosable=True,
@@ -901,7 +901,7 @@ class MessageBoxFriends(MessageBox):
 
             if char_text not in valid_chars:
                 InfoBar.error(
-                    title='输入错误',
+                    title=tr('输入错误'),
                     content=tr('第{i}个好友角色"{char_text}"不在可选项中，请重新选择').format(i=i, char_text=char_text),
                     orient=Qt.Horizontal,
                     isClosable=True,
@@ -1114,11 +1114,11 @@ class MessageBoxPowerPlan(MessageBox):
         deleteButton.clicked.connect(delete_row)
 
         # 添加到布局
-        horizontalLayout.addWidget(QLabel(tr("类型:")))
+        horizontalLayout.addWidget(QLabel(tr("类型：")))
         horizontalLayout.addWidget(typeComboBox)
-        horizontalLayout.addWidget(QLabel(tr("名称:")))
+        horizontalLayout.addWidget(QLabel(tr("名称：")))
         horizontalLayout.addWidget(nameComboBox)
-        horizontalLayout.addWidget(QLabel(tr("次数:")))
+        horizontalLayout.addWidget(QLabel(tr("次数：")))
         horizontalLayout.addWidget(countSpinBox)
         horizontalLayout.addWidget(moveUpButton)
         horizontalLayout.addWidget(deleteButton)
@@ -1169,7 +1169,7 @@ class MessageBoxPowerPlan(MessageBox):
 
             if not instance_type or instance_type not in self.template:
                 InfoBar.error(
-                    title='输入错误',
+                    title=tr('输入错误'),
                     content=tr('第{i}个计划的副本类型无效').format(i=i),
                     orient=Qt.Horizontal,
                     isClosable=True,
@@ -1390,9 +1390,9 @@ class MessageBoxInstanceTeam(MessageBox):
         deleteButton.clicked.connect(delete_row)
 
         # 应用布局
-        horizontalLayout.addWidget(QLabel(tr("名称:")))
+        horizontalLayout.addWidget(QLabel(tr("名称：")))
         horizontalLayout.addWidget(nameComboBox)
-        horizontalLayout.addWidget(QLabel(tr("队伍:")))
+        horizontalLayout.addWidget(QLabel(tr("队伍：")))
         horizontalLayout.addWidget(teamSpinBox)
         horizontalLayout.addWidget(deleteButton)
 
