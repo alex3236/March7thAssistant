@@ -4,6 +4,9 @@ locales: zh_CN
 # UI 인터페이스 언어 설정 / UI 界面语言设置
 ui_language: auto # 可选值 / 가능한 값: auto (自动判断), zh_CN (简体中文), zh_TW (繁體中文), ja_JP (日本語), ko_KR (한국어), en_US (English)
 
+# 界面主题：auto（跟随系统）、light（浅色）、dark（深色）
+ui_theme: auto
+
 # 日志设置
 log_level: INFO # 日志等级，可选值：INFO, DEBUG。INFO 仅记录重要信息，DEBUG 记录详细调试信息。
 log_retention_days: 30 # 日志保留天数，超过此天数的日志文件将被自动删除。
@@ -31,6 +34,7 @@ pause_after_success: true # 是否在成功后暂停程序。true 若非循环�
 exit_after_failure: false # 是否在失败后直接退出。true 直接退出，false 暂停程序。
 
 # 任务完成后操作
+exit_app_after_success: false # GUI 中整条任务链全部成功后关闭助手；可与退出游戏组合，有按时任务或待执行完成后操作时保持运行。
 after_finish: None # 任务完成后的操作，可选值："None"（无操作）, "Exit"（退出程序）, "Loop"（循环执行）, "Shutdown"（关机）, "Sleep"（睡眠）, "Hibernate"（休眠）, "Restart"（重启）, "Logoff"（注销）, "TurnOffDisplay"（关闭显示器）, "RunScript"（运行脚本）。
 
 # 任务完成后是否播放提示音
@@ -58,6 +62,17 @@ launcher_path: C:\Program Files\miHoYo Launcher\launcher.exe # 米哈游启动�
 update_via_launcher: False # 是否通过启动器更新游戏。 true 通过启动器更新，false 不更新。
 start_game_timeout: 10 # 启动游戏超时时间（分）。
 update_game_timeout: 12 # 更新游戏超时时间（时）。
+
+# 平台设置（开发中，普通用户不要修改）
+ui_profile: pc_1080 # UI 形态：pc_1080、touch_720。本地触屏开发需先在工具箱完成触屏模式的风险确认。
+control_backend: null # 设备后端：local、cloud、adb。留空时沿用 cloud_game_enable（含环境变量覆盖），显式设置优先。桌面分身固定使用 local。
+
+# 桌面 ADB 后端仅支持 touch_720。路径留空时自动查找。
+adb_path: null # adb 可执行文件。自动查找优先用 PATH，Windows 还会查找常见模拟器、Android SDK 和小助手下载的 adb。
+adb_serial: null # 设备序列号或 IP:端口。只有一台设备时可留空。
+adb_device_type: auto # auto（Android 14+ 模拟器用 display 0，其余用虚拟屏）、physical（虚拟屏）、emulator（强制 display 0）。
+adb_service_jar: null # 默认查找 assets/binary/m7a-device-service.jar，其次查找 Android/device-service/build/outputs/m7a-device-service.jar。
+adb_tap_ms: 50 # 单次触摸点按的毫秒数。
 
 # 云崩铁配置
 cloud_game_enable: False # 是否启动云游戏
@@ -94,6 +109,7 @@ browser_mirror_urls:
 power_enable: true # 是否启用清体力总开关。false 时完整运行和“日常”中的历战余响与清体力都会跳过，但单独执行“清体力”任务不受影响。
 power_plan: []
 power_plan_keep: false # 是否在执行后保留整份体力计划。true 保留，false 按剩余次数更新并删除已完成计划。
+power_plan_continue: true # 完成整份体力计划后，使用剩余资源刷默认副本。
 instance_type: 拟造花萼（金） # 设置副本类型，可选值：拟造花萼（金）、拟造花萼（赤）、凝滞虚影、侵蚀隧洞、饰品提取。
 calyx_golden_preference: Jarilo-VI # 设置拟造花萼（金）偏好地区，可选值："雅利洛-VI"（Jarilo-VI）、仙舟「罗浮」（XianzhouLuofu）、匹诺康尼（Penacony）。
 instance_names:
@@ -120,6 +136,7 @@ build_target_use_user_instance_when_only_erosion_and_ornament: false # 当培养
 
 # 分解设置
 break_down_level_four_relicset: false # 每周所选日期清理四星及以下遗器；可在展开项启用智能弃置。默认关闭。
+relic_bag_cleanup_enable: false # 副本遇到遗器满包时，自动分解可清理的低星遗器。
 weekly_relic_smart_discard_enable: false # 每周清理时先智能弃置五星遗器，并一并分解已弃置遗器。默认关闭。
 weekly_relic_cleanup_day_of_week: 1 # 每周从周几开始清理遗器，1=周一，7=周日；在游戏刷新时间后执行。
 weekly_relic_cleanup_timestamp: 0 # 上次成功完成每周遗器清理的时间戳。
@@ -131,10 +148,6 @@ instance_team_number: "6" # 自动切换的队伍编号。
 # 饰品提取设置为数字如 "1" 时，队伍名称必须是 "队伍1"、"队伍2" 等格式；设置为非数字时，队伍名称可以自定义，但请测试确保 OCR 能正确识别队伍名称。
 # 格式: [{"instance_name": "副本名称", "team_number": 队伍编号}]
 instance_teams: []
-
-# 合成设置
-merge_immersifier: False # 是否优先合成沉浸器。true 开启，false 关闭。
-merge_immersifier_limit: "12" # 沉浸器上限。
 
 # 开拓力使用设置
 use_reserved_trailblaze_power: False # 是否使用后备开拓力。true 使用，false 不使用。
@@ -215,13 +228,15 @@ asset_lc3_star_superimpose_enable: false # 是否启用「三星光锥自动叠�
 # 货币战争配置
 currencywars_enable: false # 是否启用「货币战争」积分奖励。true 开启，false 关闭。
 currencywars_type: overclock # 货币战争模式，可选值："normal"（标准博弈）或 "overclock"（超频博弈）。
-currencywars_rank_difficulty: lowest # 货币战争职级难度，可选值："current"（当前职级）、"lowest"（最低职级）或 "highest"（最高职级）。
-currencywars_timestamp: 0 # 上次检测到完成差分宇宙积分奖励的时间戳，用于记录和控制运行频率。
+currencywars_time_limit: 240 # 单次运行的时间上限（分钟），0 表示不限时，一直运行到当轮目标完成或手动停止。
+currencywars_rank_difficulty: lowest # 货币战争职级难度：current（当前）、lowest（最低）、highest（最高）、promotion_cap（晋升点封顶档 A4-6，未解锁时选已解锁最高）。
+currencywars_unfinished_match: restart # 遇到未完成对局时，"restart" 结算后重新开局，"resume" 按配置的策略继续进度。
+currencywars_timestamp: 0 # 上次检测到完成货币战争积分奖励的时间戳，用于记录和控制运行频率。
 currencywars_bonus_enable: false # 在领取积分奖励后自动执行位面饰品快速提取消耗深度沉浸器。true 开启，false 关闭。
-currencywars_fast_mode: true # 是否启用货币战争速通模式，仅在首领节点尝试装备武器。true 开启，false 关闭。
-currencywars_strategy: default # 货币战争策略，可选默认(default)或阿格莱雅(aglaea)
-currencywars_remembrance_trailblazer_name: "" # 阿格莱雅策略下“开拓者·记忆”在游戏内的实际显示名字，由玩家自定义；留空则跳过该角色。
-currencywars_strategy_restart_on_special_tags: true # 根据所选策略，遇到特定词条或词条组合时是否接受重开。true 开启，false 关闭。
+currencywars_fast_mode: false # 是否启用货币战争速通模式，仅在首领节点尝试装备武器。true 开启，false 关闭。
+currencywars_strategy: default # 货币战争策略，可选默认（default，按费用和星级上阵，1-1 缺前台时从商店补位）或连击那刻夏（s2_anaxa_high，按梦境那刻夏攻略组队）。旧的 aglaea、seele 和 s2_anaxa 可在设置中手动改选，运行时自动迁移到连击那刻夏。
+currencywars_investment_priority: strategy # 投资环境和投资策略的选择优先级。默认阵容固定图鉴优先。其余阵容的 "strategy" 按阵容策略选，"catalog" 优先未收录项。
+currencywars_remembrance_trailblazer_name: "" # 开拓者在游戏内的实际显示名字，由玩家自定义
 
 # 差分宇宙配置
 weekly_divergent_enable: false # 是否启用「差分宇宙」积分奖励。true 开启，false 关闭。
@@ -288,6 +303,7 @@ genshin_starRail_fps_unlocker_path: .\3rdparty\Genshin_StarRail_fps_unlocker
 
 # 忘却之庭配置
 forgottenhall_enable: false # 是否启用混沌回忆功能。true 开启，false 关闭。
+forgottenhall_stellar_enable: false # 是否启用混沌回忆星启模式；默认使用常规模式。
 forgottenhall_level: # 混沌回忆关卡范围，设置允许尝试的关卡等级范围。
   - 10
   - 12
@@ -312,6 +328,9 @@ forgottenhall_team2: # 队伍2配置。
     - -1
   - - Qingque
     - 1
+forgottenhall_team3: # 星启模式第三队默认使用丹恒，可配置1至4名角色，不能留空。
+  - - DanHeng
+    - -1
 forgottenhall_timestamp: 0 # 上次运行混沌回忆的时间戳，用于记录和控制运行频率。
 
 # 虚构叙事配置
@@ -348,6 +367,7 @@ purefiction_timestamp: 0 # 上次运行虚构叙事的时间戳，用于记录�
 
 # 末日幻影配置
 apocalyptic_enable: false # 是否启用末日幻影功能。true 开启，false 关闭。
+apocalyptic_stellar_enable: false # 是否启用末日幻影星启模式；默认使用常规模式。
 apocalyptic_level: # 末日幻影关卡范围，设置允许尝试的关卡等级范围。
   - 3
   - 4
@@ -372,7 +392,12 @@ apocalyptic_team2: # 队伍2配置。
     - -1
   - - Qingque
     - 1
+apocalyptic_team3: # 星启模式第三队默认使用丹恒，可配置1至4名角色，不能留空。
+  - - DanHeng
+    - -1
 apocalyptic_timestamp: 0 # 上次运行末日幻影的时间戳，用于记录和控制运行频率。
+# 游戏优化总开关（默认开启以兼容旧版；关闭不清除下面三个独立选项）
+game_optimization_enable: true
 # 自动战斗和二倍速检测配置
 auto_battle_detect_enable: true # 是否启用自动战斗和二倍速检测。true 开启，false 关闭。
 
@@ -383,17 +408,21 @@ ocr_slow_threshold: 5.0 # DML 模式下单次 OCR 耗时超过此值（秒）计
 # 自动修改分辨率配置
 auto_set_resolution_enable: true # 是否启用自动修改分辨率功能。true 开启，false 关闭。
 
+# 任务期间自动降低画质（默认关闭，仅支持 Windows 本地游戏的已知自定义画质格式）
+# 不修改帧率、渲染比例与抗锯齿；任务结束恢复持久配置，运行中的画面需重启游戏后恢复。
+auto_lower_graphics_enable: false
+
 # 自动配置游戏路径
 auto_set_game_path_enable: true # 是否启用自动配置游戏路径。true 开启，false 关闭。
 
-# 循环模式
-loop_mode: scheduled # 可选值："power"（根据开拓力）, "scheduled"（定时任务）
+# 循环模式（保留用于旧配置兼容，仅支持定时运行）
+loop_mode: scheduled
 
-# 指定运行时间
+# 循环运行的指定时间（after_finish 为 Loop 时生效）
 scheduled_time: 4:00
 
-# 循环运行所需开拓力
-power_limit: 160 # 设置循环运行模式时所需的最低开拓力。
+# 启动运行设置
+no_run_immediately: false # 启动时先等待，等同于 --no-run-immediately。
 
 # 游戏刷新时间设置
 refresh_hour: 4 # 设置游戏每日刷新的时间（24小时制）。
@@ -405,6 +434,7 @@ script_path: C:\Path\to\your\Script.bat
 hotkey_technique: e # 设置游戏内使用秘技的按键。
 hotkey_map: m # 设置打开地图的按键。
 hotkey_warp: f3 # 设置打开跃迁的按键。
+hotkey_message: p # 设置打开短信的按键。
 hotkey_auto_battle: v # 设置自动战斗的按键。
 
 # 图形界面快捷键设置
@@ -454,7 +484,7 @@ scheduled_tasks: [] # 示例：
 #     enabled: true
 
 use_background_screenshot: true # 是否优先使用后台截图
-local_control_mode: foreground # Windows 本地操作模式：foreground 前台；background 后台（滚轮临时切前台）。下次启动任务生效。
+local_control_mode: foreground # Windows 本地操作模式：foreground 前台；background 后台。下次启动任务生效。
 background_mouse_protection: false # 后台鼠标重试失败时，最多保护鼠标 2 秒；保留键盘和暂停热键。
 
 # 开机启动设置（在图形界面「设置 - 杂项」中通过「配置」按钮设置）
@@ -488,6 +518,7 @@ auto_update: false
 update_source: GitHub # 更新源，可选值："GitHub"（海外源）, "MirrorChyan"（Mirror 酱）
 mirrorchyan_cdk: "" # MirrorChyan CDK
 update_download_proxy: "" # 更新下载代理，留空则使用系统代理。支持 http://127.0.0.1:7890 和 socks5://127.0.0.1:1080，仅在下载更新文件时生效，且优先于系统代理。
+github_token: "" # GitHub API 认证 Token，选填。留空时读取 GITHUB_TOKEN 环境变量。
 
 # 消息推送配置
 # 消息推送格式配置

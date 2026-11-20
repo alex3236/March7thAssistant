@@ -1,5 +1,8 @@
 from module.screen import screen
 from module.config import cfg
+from module.config.platform import get_control_backend
+from module.game import cloud_game, require_desktop_task
+from module.localization import tr
 from module.logger import log
 from module.automation import auto
 from module.notification.notification import NotificationLevel
@@ -14,6 +17,7 @@ from module.config import asu_config
 from utils.console import pause_on_error, pause_and_retry
 from tasks.power.power import Power
 from tasks.weekly.weekly_reward import wait_for_weekly_reward
+from tasks.base.task_steps import optional_reward
 
 
 class Universe:
@@ -111,6 +115,7 @@ class Universe:
 
     @staticmethod
     def before_start():
+        require_desktop_task(cfg, tr("模拟宇宙"))
         Universe.check_path()
         if cfg.universe_operation_mode == "source":
             PythonChecker.run()
@@ -163,7 +168,8 @@ class Universe:
         if save:
             cfg.save_timestamp("universe_timestamp")
 
-        screen.wait_for_screen_change('main')
+        with optional_reward("模拟宇宙领奖准备"):
+            screen.wait_for_screen_change('main')
         Universe.get_reward(category)
 
     @staticmethod
@@ -202,7 +208,7 @@ class Universe:
             log.warning("模拟宇宙功能仅支持 Windows 平台")
             return False
 
-        if cfg.cloud_game_enable and cfg.browser_headless_enable:
+        if get_control_backend(cfg) == "cloud" and cloud_game.is_headless():
             log.error("模拟宇宙不支持无界面模式运行")
             return False
 
@@ -236,61 +242,37 @@ class Universe:
     @staticmethod
     def get_reward(category):
         log.info("开始领取奖励")
-        if auto.find_element("./assets/images/share/base/F.png", "image", 0.9, crop=(998.0 / 1920, 473.0 / 1080, 392.0 / 1920, 296.0 / 1080)):
-            auto.press_key("f")
-            if category == "divergent":
-                screen.wait_for_screen_change('divergent_main')
+        claimed = False
+        with optional_reward("模拟宇宙周期奖励"):
+            lobby = "divergent_main" if category == "divergent" else "universe_main"
+            if auto.find_element("./assets/images/share/base/F.png", "image", 0.9, crop=(998.0 / 1920, 473.0 / 1080, 392.0 / 1920, 296.0 / 1080)):
+                auto.press_key("f")
+                screen.wait_for_screen_change(lobby)
             else:
-                screen.wait_for_screen_change('universe_main')
-        else:
-            if category == "divergent":
-                screen.change_to('divergent_main')
-            else:
-                screen.change_to('universe_main')
-        time.sleep(1)
-        if auto.click_element("./assets/images/share/base/RedExclamationMark.png", "image", 0.9, crop=(0 / 1920, 877.0 / 1080, 422.0 / 1920, 202.0 / 1080)):
-            if auto.click_element("./assets/images/zh_CN/universe/one_key_receive.png", "image", 0.9, max_retries=10):
-                if wait_for_weekly_reward():
-                    time.sleep(2)
+                screen.change_to(lobby)
+            time.sleep(1)
+            if (
+                auto.click_element("./assets/images/share/base/RedExclamationMark.png", "image", 0.9,
+                                   crop=(0 / 1920, 877.0 / 1080, 422.0 / 1920, 202.0 / 1080))
+                and auto.click_element("./assets/images/zh_CN/universe/one_key_receive.png", "image", 0.9, max_retries=10)
+                and wait_for_weekly_reward()
+            ):
+                claimed = True
+                time.sleep(2)
+                with optional_reward("模拟宇宙周期奖励通知"):
                     Base.send_notification_with_screenshot(cfg.notify_template['SimulatedUniverseRewardClaimed'], NotificationLevel.ALL)
-                    auto.click_element("./assets/images/zh_CN/base/click_close.png", "image", 0.8, max_retries=10)
-                    time.sleep(1)
-                    auto.press_key("esc")
-                    if category == "divergent" and cfg.universe_bonus_enable:
-                        Universe.process_ornament()
-        Base.send_notification_with_screenshot(cfg.notify_template['SimulatedUniverseCompleted'], NotificationLevel.ALL)
+                auto.click_element("./assets/images/zh_CN/base/click_close.png", "image", 0.8, max_retries=10)
+                time.sleep(1)
+                auto.press_key("esc")
+        if claimed and category == "divergent" and cfg.universe_bonus_enable:
+            with optional_reward("模拟宇宙周期奖励饰品提取"):
+                Universe.process_ornament()
+        with optional_reward("模拟宇宙完成通知"):
+            Base.send_notification_with_screenshot(cfg.notify_template['SimulatedUniverseCompleted'], NotificationLevel.ALL)
 
     @staticmethod
     def process_ornament():
-        screen.change_to("guide3")
-
-        immersifier_crop = (1623.0 / 1920, 40.0 / 1080, 162.0 / 1920, 52.0 / 1080)
-        text = auto.get_single_line_text(crop=immersifier_crop, blacklist=['+', '米'], max_retries=3)
-        if "/12" not in text:
-            log.error("沉浸器数量识别失败")
-            return
-
-        immersifier_count = int(text.split("/")[0])
-        log.info(f"沉浸器: {immersifier_count}/12")
-        if immersifier_count > 0:
-            instance_name = cfg.instance_names["饰品提取"]
-
-            # 使用培养目标的副本配置（如果启用）
-            try:
-                if cfg.build_target_enable:
-                    from tasks.daily.buildtarget import BuildTarget
-                    target_instances = BuildTarget.get_target_instances()
-
-                    for target_type, target_name in target_instances:
-                        # 精确匹配副本类型
-                        if target_type == "饰品提取":
-                            log.info(f"使用培养目标副本: {target_name}")
-                            instance_name = target_name
-                            break
-            except Exception as e:
-                log.error(f"获取培养目标副本失败: {e}")
-
-            Power.process("饰品提取", instance_name, immersifier_only = True)
+        Power.process_immersifier_only()
 
     @staticmethod
     def gui():

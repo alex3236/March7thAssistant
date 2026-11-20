@@ -71,7 +71,7 @@ def _file_fingerprint(path):
     except OSError as e:
         return f"<读取失败: {e}>"
     digest = hashlib.sha256(data).hexdigest()[:12]
-    return f"size={len(data)} sha256={digest} head={data[:120]!r}"
+    return f"size={len(data)} sha256={digest}"
 
 
 # 读取重试：并发读写冲突（如另一进程正在 os.replace）只持续毫秒级，重试几次即可避开
@@ -122,10 +122,25 @@ _ENV_OVERRIDE_MAP = {
     "MARCH7TH_LOG_LEVEL": ("log_level", lambda v: v.upper()),  # 日志等级：INFO, DEBUG, WARNING, ERROR
     "MARCH7TH_AFTER_FINISH": ("after_finish", lambda v: v),  # 任务完成后操作：None, Exit, Loop, Shutdown, Sleep, Hibernate, Restart, Logoff, TurnOffDisplay, RunScript
     "MARCH7TH_BROWSER_TYPE": ("browser_type", lambda v: v),  # 浏览器类型：integrated, edge, chrome
+    "MARCH7TH_NO_RUN_IMMEDIATELY": ("no_run_immediately", lambda v: v.lower() in ("true", "1")),
 }
 
 # 反向映射：配置键 -> 环境变量名
 _CONFIG_KEY_TO_ENV = {v[0]: k for k, v in _ENV_OVERRIDE_MAP.items()}
+
+# 分身使用本地前台输入，避免改动同一账户共享的画质和启动器状态。
+# 这里只覆盖会写入共用游戏设置或系统状态的开关；战斗中的自动战斗检测只按 V 和
+# 战斗界面按钮操作，不改动共用设置，因此保留用户自己的配置，见 tasks/game。
+_DESKTOP_TWIN_OVERRIDES = {
+    "control_backend": "local",
+    "cloud_game_enable": False,
+    "local_control_mode": "foreground",
+    "update_via_launcher": False,
+    "auto_lower_graphics_enable": False,
+    "auto_set_resolution_enable": False,
+    "auto_set_game_path_enable": False,
+    "after_finish": "None",
+}
 
 
 def _get_env_override(config_key):
@@ -134,6 +149,8 @@ def _get_env_override(config_key):
     :param config_key: 配置键名
     :return: (has_override, value) 如果有覆盖返回 (True, 覆盖值)，否则返回 (False, None)
     """
+    if config_key in _DESKTOP_TWIN_OVERRIDES and os.environ.get("MARCH7TH_DESKTOP_TWIN"):
+        return True, _DESKTOP_TWIN_OVERRIDES[config_key]
     env_name = _CONFIG_KEY_TO_ENV.get(config_key)
     if env_name:
         env_value = os.environ.get(env_name)
@@ -154,6 +171,7 @@ class Config(metaclass=SingletonMeta):
     # 只读角色（更新器/清理器等旁观进程）：只读取配置、绝不写入。
     # 进程启动时通过环境变量 MARCH7TH_CONFIG_READONLY=1 声明。
     _readonly = False
+    writes_suspended = False
 
     def __init__(self, version_path, example_path, config_path):
         Config._readonly = os.environ.get("MARCH7TH_CONFIG_READONLY", "").lower() in ("1", "true")
@@ -259,6 +277,10 @@ class Config(metaclass=SingletonMeta):
             self._handle_broken_config(path, detail)
             return
 
+        # 旧体力循环统一转为定时模式；缺失的定时时间沿用模板默认值。
+        if loaded_config.get("loop_mode") == "power":
+            loaded_config["loop_mode"] = "scheduled"
+            _diag("info", "体力循环模式已移除，自动切换为定时模式")
         self._update_config(self.config, loaded_config)
         _diag("debug", f"_load_config 成功: 合并 {len(loaded_config)} 个顶层键")
         if save:
@@ -390,7 +412,7 @@ class Config(metaclass=SingletonMeta):
 
     def save_config(self):
         """保存配置到文件（先写临时文件再原子替换；替换持续失败时先备份再降级为原地覆盖写入）"""
-        if Config._readonly:
+        if Config._readonly or self.writes_suspended:
             # 更新器/清理器等旁观进程不写配置：多进程并发写是配置损坏的根源之一
             _diag("info", f"save_config 跳过（当前进程为只读角色，不写配置文件）: {os.path.abspath(self.config_path)}")
             return
@@ -490,6 +512,11 @@ class Config(metaclass=SingletonMeta):
 
     def get_value(self, key, default=None):
         """获取配置项的值，环境变量优先，如果值是可变对象，则返回其拷贝"""
+        if key == "cloud_game_enable":
+            # 兼容仍读取旧开关的任务和 GUI，保留 YAML 中的原值。
+            backend = self.get_value("control_backend")
+            if backend is not None:
+                return backend == "cloud"
         # 先检查环境变量覆盖
         has_override, override_value = _get_env_override(key)
         if has_override:
@@ -502,7 +529,8 @@ class Config(metaclass=SingletonMeta):
 
     def set_value(self, key, value):
         """设置配置项的值并保存"""
-        _diag("debug", f"set_value: {key}={value!r}")
+        logged_value = "***" if key == "github_token" else repr(value)
+        _diag("debug", f"set_value: {key}={logged_value}")
         # 读取外部改动但不再多写一次：save_config 只在最后落盘一次
         self._load_config(save=False)
         if isinstance(value, (list, dict, set)):
@@ -533,12 +561,5 @@ class Config(metaclass=SingletonMeta):
     def __getattr__(self, attr):
         """允许通过属性访问配置项的值，环境变量优先"""
         if attr in self.config:
-            # 先检查环境变量覆盖
-            has_override, override_value = _get_env_override(attr)
-            if has_override:
-                return override_value
-            value = self.config[attr]
-            if isinstance(value, (list, dict, set)):
-                return copy.deepcopy(value)
-            return value
+            return self.get_value(attr)
         raise AttributeError(f"'{type(self).__name__}' 对象没有属性 '{attr}'")

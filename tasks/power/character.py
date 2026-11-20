@@ -3,14 +3,41 @@ from module.logger import log
 from module.config import cfg
 import time
 from module.automation.screenshot import Screenshot
+from tasks.base.list_drag import drag_list
+
+
+SUPPORT_BUTTON_CROPS = {
+    "standard": (966 / 1920, 954 / 1080, 176 / 1920, 60 / 1080),
+    "ornament": (610 / 1920, 864 / 1080, 184 / 1920, 64 / 1080),
+}
+CHALLENGE = (1392 / 1920, 946 / 1080, 487 / 1920, 83 / 1080)
+SUPPORT_RETRY_CROPS = {
+    "standard": (966 / 1920, 946 / 1080, 913 / 1920, 83 / 1080),
+    "ornament": (610 / 1920, 864 / 1080, 1269 / 1920, 165 / 1080),
+}
+SUPPORT_LIST_TITLES = ["支援列表", "支援角色"]
+SUPPORT_LIST_TITLE_CROP = (157 / 1920, 22 / 1080, 300 / 1920, 81 / 1080)
+
+
+def _button_in_crop(button, crop, frame_crop):
+    if not button:
+        return False
+    (left, top), (right, bottom) = button
+    frame_left, frame_top, frame_width, frame_height = auto.screenshot_pos
+    frame_x, frame_y, frame_width_ratio, frame_height_ratio = frame_crop
+    scale = auto.screenshot_scale_factor
+    x = frame_x + ((left + right) / 2 - frame_left) * scale * frame_width_ratio / frame_width
+    y = frame_y + ((top + bottom) / 2 - frame_top) * scale * frame_height_ratio / frame_height
+    crop_x, crop_y, crop_width, crop_height = crop
+    return crop_x <= x <= crop_x + crop_width and crop_y <= y <= crop_y + crop_height
 
 
 class Character:
     @staticmethod
-    def borrow(type="standard"):
+    def borrow(type="standard", *, for_training=False):
         # 检测是否可以执行借助支援角色
-        if Character.is_borrow_disabled():
-            return True
+        if Character.is_borrow_disabled(for_training):
+            return False
 
         # 点击支援按钮并进入支援列表
         if not Character.click_support_button(type):
@@ -20,28 +47,40 @@ class Character:
         return Character.find_and_select_support(type)
 
     @staticmethod
-    def is_borrow_disabled():
+    def is_borrow_disabled(for_training=False):
         """检测是否需要使用支援角色"""
         if not cfg.borrow_enable:
             return True
-        if not (("使用支援角色并获得战斗胜利1次" in cfg.daily_tasks and cfg.daily_tasks["使用支援角色并获得战斗胜利1次"])
-                or cfg.borrow_character_enable):
-            return True
-        return False
+        return not (cfg.borrow_character_enable or for_training)
 
     @staticmethod
     def click_support_button(type):
         """点击支援按钮，进入支援列表"""
-        if type == "standard":
-            if not auto.click_element("支援", "text", max_retries=10, crop=(966 / 1920, 954 / 1080, 176 / 1920, 60 / 1080)):
-                log.error("找不到支援按钮")
-                return False
-        elif type == "ornament":
-            if not auto.click_element("支援", "text", max_retries=10, crop=(610 / 1920, 864 / 1080, 184 / 1920, 64 / 1080)):
-                log.error("找不到支援按钮")
-                return False
-        time.sleep(1)
-        return auto.find_element(["支援列表", "支援角色"], "text", max_retries=10, crop=(157.0 / 1920, 22.0 / 1080, 300.0 / 1920, 81.0 / 1080))
+        crop = SUPPORT_BUTTON_CROPS.get(type)
+        if crop is None:
+            return False
+        button = auto.find_element("支援", "text", max_retries=10, crop=crop)
+        if not button:
+            log.warning("找不到支援按钮，本次跳过借用支援")
+            return False
+
+        for attempt in range(2):
+            auto.click_element_with_pos(button)
+            time.sleep(1)
+            if auto.find_element(SUPPORT_LIST_TITLES, "text", max_retries=10, crop=SUPPORT_LIST_TITLE_CROP):
+                return True
+            if attempt:
+                break
+            # 补点前用同一帧确认仍在挑战页，且支援按钮还在。
+            frame_crop = SUPPORT_RETRY_CROPS[type]
+            challenge = auto.find_element("开始挑战", "text", crop=frame_crop)
+            if not _button_in_crop(challenge, CHALLENGE, frame_crop):
+                break
+            button = auto.find_element("支援", "text", take_screenshot=False, need_ocr=False)
+            if not _button_in_crop(button, crop, frame_crop):
+                break
+        log.warning("未确认打开支援列表，本次跳过借用支援")
+        return False
 
     @staticmethod
     def find_and_select_support(type):
@@ -58,7 +97,10 @@ class Character:
             else:
                 # 若未找到角色，尝试滚动页面
                 if i < cfg.borrow_scroll_times - 1:
-                    Character.scroll_support_list()
+                    if not Character.scroll_support_list():
+                        if auto.find_element(SUPPORT_LIST_TITLES, "text", crop=SUPPORT_LIST_TITLE_CROP):
+                            Character.exit_support_list(type)
+                        return False
                 continue
 
             # 当队伍已满时点击编队界面的最后一个槽位，踢出最后一个角色
@@ -118,15 +160,13 @@ class Character:
             result = auto.find_element(("解除支援", "取消"), "text", max_retries=10, include=True)
             return Character.process_support_selection_result(result)
         elif type == "ornament":
-            Character.complete_ornament_borrow()
-            return True
+            return Character.complete_ornament_borrow()
 
     @staticmethod
     def process_support_selection_result(result):
         """处理支援选择的结果"""
         if result:
             if auto.matched_text == "解除支援":
-                Character.complete_daily_task()
                 return True
             elif auto.matched_text == "取消":
                 auto.click_element_with_pos(result)
@@ -138,31 +178,23 @@ class Character:
     @staticmethod
     def complete_ornament_borrow():
         """完成饰品提取的后续操作"""
-        Character.complete_daily_task()
         auto.press_key("esc")
         time.sleep(1)
-        auto.find_element("解除支援", "text", max_retries=10, crop=(610 / 1920, 864 / 1080, 184 / 1920, 64 / 1080))
-
-    @staticmethod
-    def complete_daily_task():
-        """标记日常任务已完成"""
-        if "使用支援角色并获得战斗胜利1次" in cfg.daily_tasks:
-            cfg.daily_tasks["使用支援角色并获得战斗胜利1次"] = False
-            cfg.save_config()
+        return bool(auto.find_element("解除支援", "text", max_retries=10, crop=SUPPORT_BUTTON_CROPS["ornament"]))
 
     @staticmethod
     def scroll_support_list():
-        """滚动支援列表"""
-        auto.click_element("等级", "text", max_retries=1, crop=(40.0 / 1920, 152.0 / 1080, 531.0 / 1920, 809.0 / 1080), include=True, action="move")
-        auto.mouse_scroll(23, -1, False)
+        """拖动支援列表，失败时由调用方退出，不继续选择角色。"""
+        completed = drag_list(auto, (400 / 1920, 850 / 1080), (400 / 1920, 400 / 1080),
+                              crop=(40 / 1920, 152 / 1080, 531 / 1920, 809 / 1080), duration=1.0)
         time.sleep(0.5)
+        return completed
 
     @staticmethod
     def exit_support_list(type):
         """退出支援列表"""
         auto.press_key("esc")
         time.sleep(1)
-        if type == "standard":
-            auto.find_element("支援", "text", max_retries=10, crop=(966 / 1920, 954 / 1080, 176 / 1920, 60 / 1080))
-        elif type == "ornament":
-            auto.find_element("支援", "text", max_retries=10, crop=(610 / 1920, 864 / 1080, 184 / 1920, 64 / 1080))
+        crop = SUPPORT_BUTTON_CROPS.get(type)
+        if crop is not None:
+            auto.find_element("支援", "text", max_retries=10, crop=crop)

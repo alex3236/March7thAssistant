@@ -25,6 +25,8 @@
 
 快速上手，请访问：[使用教程](https://m7a.top/docs/#/assets/docs/Tutorial)
 
+安卓手机用户，请看：[安卓版使用教程](https://m7a.top/docs/#/assets/docs/Android)
+
 遇到问题，请在提问前查看：[FAQ](https://m7a.top/docs/#/assets/docs/FAQ)
 
 </div>
@@ -34,6 +36,7 @@
 - **日常**：清体力、每日实训、领取奖励、委托、锄大地
 - **周常**：历战余响、模拟宇宙、差分宇宙、货币战争、混沌回忆、虚构叙事、末日幻影
 - **云·星穹铁道**：支持后台运行、无窗口运行和 [Docker](https://m7a.top/docs/#/assets/docs/Docker) 运行
+- **安卓版**：直接安装在手机上，游戏在后台虚拟屏中运行，支持日常、每日实训和清体力，详见 [安卓版使用教程](https://m7a.top/docs/#/assets/docs/Android)
 - **抽卡记录导出**：支持 [UIGF](https://uigf.org/zh/standards/uigf.html)/[SRGF](https://uigf.org/zh/standards/srgf.html) 标准
 - **工具箱**：自动对话、解锁帧率、兑换码、触屏模式
 - 每日实训等任务的完成情况支持**消息推送**
@@ -55,6 +58,8 @@
 
 前往 [Releases](https://github.com/moesnow/March7thAssistant/releases/latest) 下载后解压双击三月七图标的 `March7th Launcher.exe` 打开图形界面
 
+安卓手机请在同一页面下载 `March7thAssistant_full_android.apk` 安装，打开后按 App 内的权限引导完成 Shizuku 或 Root 授权，详见 [安卓版使用教程](https://m7a.top/docs/#/assets/docs/Android)
+
 ## 使用 AI 助手操作
 
 DeepSeek Harness、Codex、Claude Code 等能执行命令的 AI 助手都可以直接操作三月七小助手：安装、运行任务、修改设置、查看日志和排查问题。
@@ -62,13 +67,13 @@ DeepSeek Harness、Codex、Claude Code 等能执行命令的 AI 助手都可以�
 - 已经安装：在「设置 → 关于 → AI 助手」点击「复制提示词」，粘贴给你的 AI 助手即可
 - 还没安装：对 AI 助手说「帮我安装三月七小助手，说明见 https://m7a.top/assets/agent/skills/march7th-assistant/SKILL.md 」
 
-AI 助手使用的是不需要管理员权限的命令行入口 `m7a.exe`（运行任务时会弹出一次 UAC），说明文件随程序一起发布在 [`assets/agent/`](assets/agent/skills/march7th-assistant/SKILL.md)，同样适用于其他支持 Skill 的 AI 助手。详见 [AI 助手文档](https://m7a.top/docs/#/assets/docs/Agent)。
+AI 助手使用的是不需要管理员权限的命令行入口 `m7a.exe`（运行任务时默认弹出一次 UAC，人不在电脑前时可在设置中开启「免 UAC 运行」），说明文件随程序一起发布在 [`assets/agent/`](assets/agent/skills/march7th-assistant/SKILL.md)，同样适用于其他支持 Skill 的 AI 助手。详见 [AI 助手文档](https://m7a.top/docs/#/assets/docs/Agent)。
 
 ## 源码运行
 
 如果你是完全不懂的小白，请通过上面的方式下载安装，可以不用往下看了。
 
-需要 Python 3.12 或更高版本。
+需要 Python 3.12 至 3.14。
 
 Windows 下如果通过终端启动，建议使用管理员模式打开 PowerShell、Windows Terminal 或 CMD；Windows 11 24H2 及以上也可以按 [Sudo for Windows](https://learn.microsoft.com/zh-cn/windows/advanced-settings/sudo/) 的方式执行。
 

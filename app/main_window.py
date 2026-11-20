@@ -1,10 +1,15 @@
-from PySide6.QtCore import Qt, QSize, QPoint, QFileSystemWatcher, Signal, QObject
-from PySide6.QtGui import QIcon, QAction
-from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QLabel
+from utils.game_options import game_option_enabled
+from utils.desktop_twin import in_desktop_twin
+from PySide6.QtCore import Qt, QSize, QPoint, QFileSystemWatcher, Signal, QObject, QTimer, QThread, QSignalBlocker, QEvent, QVariantAnimation
+from PySide6.QtGui import QAction, QPainter
+from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QLabel, QHBoxLayout, QVBoxLayout, QGraphicsEffect, QWidget
 
-from qfluentwidgets import NavigationItemPosition, MSFluentWindow, SplashScreen, setThemeColor, NavigationBarPushButton, setTheme, Theme, themeColor, qconfig
+from .components.evey_decoration import EveyControlDecoration, EveyTitleDecoration
+from .common.accent import MARCH7TH_PINK, EVERNIGHT_RED, set_accent_color
+
+from qfluentwidgets import NavigationItemPosition, MSFluentWindow, SplashScreen, setThemeColor, NavigationBarPushButton, themeColor, qconfig
 from qfluentwidgets import FluentIcon as FIF
-from qfluentwidgets import InfoBar, InfoBarPosition, SystemTrayMenu
+from qfluentwidgets import InfoBar, InfoBarIcon, InfoBarPosition, PrimaryPushButton, SystemTrayMenu, ToolTipFilter, ToolTipPosition
 from app.tools.game_starter import GameStartStatus, GameLaunchThread
 
 from .home_interface import HomeInterface
@@ -16,20 +21,43 @@ from .workflow_interface import WorkflowInterface
 from .setting_interface import SettingInterface
 from .log_interface import LogInterface
 from .common.signal_bus import signalBus
+from .common.evernight import EvernightEasterEgg
+from .common.evernight_artwork import evernight_artwork
+from .common.theme_assets import application_icon_path
+from .common.window_icon import set_application_icon
+from .components.evey_animation import EveyAnimation
 
 from .card.messagebox_custom import MessageBoxSupport
 from .tools.check_update import checkUpdate
-from .tools.check_theme_change import checkThemeChange
+from .tools.check_theme_change import checkThemeChange, applyTheme
 from .tools.announcement import checkAnnouncement
 from .tools.disclaimer import disclaimer
 
 from module.config import cfg
+from app.tools.adb_service import display_connection
+from module.automation import auto
 from module.logger import log
 from module.game import get_game_controller
 from module.localization import tr
+from module.screen import screen
+from tasks.tool import stop_plot
 import base64
 import os
 import sys
+
+
+def fit_menu_width(menu):
+    """按当前菜单项文字重新计算 Fluent 菜单宽度。
+
+    qfluentwidgets 调整列表尺寸时用 setFixedSize 锁住了最小宽度，之后只会变宽：
+    菜单项文字改短（例如“桌面分身（运行中）”恢复为“桌面分身”）后要先放开再重算。
+    """
+    view = getattr(menu, 'view', None)
+    if view is None:
+        return
+    view.setMinimumWidth(0)
+    view.adjustSize()
+    menu.adjustSize()
 
 
 class ConfigWatcher(QObject):
@@ -49,7 +77,6 @@ class ConfigWatcher(QObject):
 
     def _on_config_changed(self, path):
         """检测到文件变化，延迟处理避免频繁触发"""
-        from PySide6.QtCore import QTimer
 
         log.debug(f"[config-watch] 文件变化事件: {path}")
 
@@ -94,22 +121,121 @@ class ClickableLabel(QLabel):
         super().mousePressEvent(event)
 
 
+class LogoShakeEffect(QGraphicsEffect):
+    """Rotate only the artwork, keeping the logo's layout and hit area fixed."""
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.angle = 0.0
+        self.timeline = QVariantAnimation(self)
+        self.timeline.setDuration(440)
+        self.timeline.setKeyValues([(0.0, 0.0), (0.16, -14.0), (0.34, 12.0),
+                                    (0.54, -8.0), (0.74, 5.0), (1.0, 0.0)])
+        self.timeline.valueChanged.connect(self._advance)
+
+    def shake(self):
+        self.timeline.stop()
+        self.timeline.start()
+
+    def _advance(self, angle):
+        self.angle = angle
+        self.update()
+
+    def boundingRectFor(self, rect):
+        return rect.adjusted(-4, -4, 4, 4)
+
+    def draw(self, painter):
+        offset = QPoint()
+        pixmap = self.sourcePixmap(Qt.CoordinateSystem.LogicalCoordinates, offset,
+                                   QGraphicsEffect.PixmapPadMode.NoPad)
+        center = self.sourceBoundingRect().center()
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        painter.translate(center)
+        painter.rotate(self.angle)
+        painter.translate(-center)
+        painter.drawPixmap(offset, pixmap)
+        painter.restore()
+
+
+class EasterEggClickFilter(QObject):
+    clicked = Signal()
+
+    def __init__(self, logo):
+        super().__init__(logo)
+        self.logo = logo
+        self.shake_effect = LogoShakeEffect(logo)
+        logo.setGraphicsEffect(self.shake_effect)
+        self.hit_target = QWidget(logo.parentWidget())
+        self.hit_target.setObjectName('logoClickTarget')
+        self.hit_target.setFixedSize(48, 48)
+        self.hit_target.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.hit_target.installEventFilter(self)
+        logo.installEventFilter(self)
+        self._position_target()
+
+    def _position_target(self):
+        self.hit_target.move(self.logo.x() - (self.hit_target.width() - self.logo.width()) // 2,
+                             self.logo.y() - (self.hit_target.height() - self.logo.height()) // 2)
+        self.hit_target.raise_()
+
+    def eventFilter(self, obj, event):
+        if obj is self.logo and event.type() in (QEvent.Type.Move, QEvent.Type.Resize):
+            self._position_target()
+        if (event.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonDblClick,
+                             QEvent.Type.MouseButtonRelease)
+                and event.button() == Qt.MouseButton.LeftButton):
+            # 只记录完整点击；吞掉双击，避免快速连点 LOGO 使窗口最大化。
+            if (event.type() == QEvent.Type.MouseButtonRelease
+                    and obj.rect().contains(event.position().toPoint())):
+                self.shake_effect.shake()
+                self.clicked.emit()
+            return True
+        if event.type() == QEvent.Type.MouseMove and event.buttons() & Qt.MouseButton.LeftButton:
+            return True
+        return super().eventFilter(obj, event)
+
+
 class MainWindow(MSFluentWindow):
+    TASK_EXIT_DELAY_MS = 5000
+
     def __init__(self, task=None, exit_on_complete=False, start_minimized_to_tray=False):
         super().__init__()
+        self._desktop_twin_hosting = False
+        self._desktop_twin_tray_action = None
+        self._desktop_twin_notice = None
+        self._desktop_twin_badge = None
+        self._backend_connection = display_connection(cfg)
+        self._pending_ui_language = None
+        self._navigation_animation_running = False
+        self.stackedWidget.view.aniStart.connect(lambda: setattr(self, '_navigation_animation_running', True))
+        self.stackedWidget.view.aniFinished.connect(lambda: setattr(self, '_navigation_animation_running', False))
+        self._language_change_timer = QTimer(self)
+        self._language_change_timer.setSingleShot(True)
+        self._language_change_timer.timeout.connect(self._rebuild_interfaces_for_language)
+        self._config_reload_timer = QTimer(self)
+        self._config_reload_timer.setSingleShot(True)
+        self._config_reload_timer.timeout.connect(self._on_config_file_changed)
         self.startup_task = task  # 保存启动时要执行的任务
-        self.exit_on_complete = exit_on_complete  # 任务完成后是否退出
+        self.exit_on_complete = exit_on_complete  # 命令行指定的单次退出请求
+        self._task_exit_pending = False
+        self._task_exit_requested_by_cli = False
+        self._task_exit_timer = QTimer(self)
+        self._task_exit_timer.setSingleShot(True)
+        self._task_exit_timer.timeout.connect(self._quitAfterTask)
         self.start_minimized_to_tray = start_minimized_to_tray
         self._defer_startup_checks = False  # 静默启动时推迟的启动检查（检查更新/公告）
         self.detected_update_version = None
         self.updateVersionBadge = None
-        qconfig.themeChanged.connect(self._on_theme_changed)
+        self._evernight = EvernightEasterEgg()
+        self._evernight_active = False
+        self._evey_animation = None
 
         self.initWindow()
 
         self.initInterface()
         self.initNavigation()
         self.initSystemTray()
+        qconfig.themeChanged.connect(self._on_theme_changed)
 
         if self.start_minimized_to_tray:
             self.hide()
@@ -120,7 +246,6 @@ class MainWindow(MSFluentWindow):
 
         # 如果有启动任务，延迟执行
         if self.startup_task:
-            from PySide6.QtCore import QTimer
             QTimer.singleShot(1000, self._executeStartupTask)
         elif self.start_minimized_to_tray:
             # 最小化到托盘启动：不弹出任何窗口，检查更新与公告推迟到主窗口首次显示
@@ -142,8 +267,8 @@ class MainWindow(MSFluentWindow):
         # 要求 PySideSix-Frameless-Window>=0.7.0
         # self.setMicaEffectEnabled(False)
 
-        setThemeColor('#f18cb9', lazy=True)
-        setTheme(Theme.AUTO, lazy=True)
+        setThemeColor(MARCH7TH_PINK, lazy=True)
+        applyTheme(self)
 
         # 禁用最大化
         # self.titleBar.maxBtn.setHidden(True)
@@ -171,10 +296,14 @@ class MainWindow(MSFluentWindow):
         else:
             self.resize(min_width, min_height)
 
-        self.setWindowIcon(QIcon('./assets/logo/March7th.ico'))
+        easter_egg_click = EasterEggClickFilter(self.titleBar.iconLabel)
+        easter_egg_click.clicked.connect(self._on_logo_clicked)
+        set_application_icon(self, application_icon_path(), 'March7th Assistant')
         self.setWindowTitle("March7th Assistant")
         # 分离系统窗口标题与应用内标题栏文本
         self._refreshWindowTitleBar()
+
+        self._evey_title_decoration = EveyTitleDecoration(self.titleBar)
 
         # 创建启动画面
         self.splashScreen = SplashScreen(self.windowIcon(), self)
@@ -220,7 +349,27 @@ class MainWindow(MSFluentWindow):
             self.setGeometry(target_geometry)
 
     def _baseTitleBarText(self):
-        return f"March7th Assistant {cfg.version}"
+        return f"{self._assistant_name()} {cfg.version}"
+
+    def _assistant_name(self):
+        return 'Evernight Assistant' if self._evernight_active else 'March7th Assistant'
+
+    def _refreshDesktopTwinBadge(self):
+        """分身内的小助手在标题栏标出身份，透过分身画面也能和主桌面的小助手区分开。"""
+        if not in_desktop_twin() or not hasattr(getattr(self, 'titleBar', None), 'hBoxLayout'):
+            return
+        if self._desktop_twin_badge is None:
+            from .components.pill_label import PillLabel
+            badge = PillLabel(parent=self.titleBar)
+            badge.installEventFilter(ToolTipFilter(badge, 300, ToolTipPosition.BOTTOM))
+            layout = self.titleBar.hBoxLayout
+            index = layout.indexOf(self.titleBar.titleLabel) + 1
+            layout.insertWidget(index, badge, 0, Qt.AlignmentFlag.AlignVCenter)
+            layout.insertSpacing(index + 1, 8)
+            self._desktop_twin_badge = badge
+        self._desktop_twin_badge.setText(tr('桌面分身'))
+        self._desktop_twin_badge.setToolTip(
+            tr('这是运行在桌面分身中的小助手。分身内固定使用前台模式，不调整画质和分辨率，也不执行任务完成后的关机等操作'))
 
     def _ensureUpdateVersionBadge(self):
         if self.updateVersionBadge is not None:
@@ -246,6 +395,8 @@ class MainWindow(MSFluentWindow):
             self.titleBar.setTitle(self._baseTitleBarText())
 
         badge = self._ensureUpdateVersionBadge()
+        # 更新徽章先插入，分身徽章再插到标题后面，两者依次排列
+        self._refreshDesktopTwinBadge()
         if badge is None:
             return
 
@@ -266,7 +417,66 @@ class MainWindow(MSFluentWindow):
                 pass
 
     def _on_theme_changed(self):
+        selected = self._evernight.selected
+        if not selected and self._evey_animation is not None:
+            self._evey_animation.close()  # closed 回调按当前主题统一刷新。
+            return
+        # 首次动画到中点时替换角色，动画继续；之后随主题即时切换。
+        active = (selected and self._evernight.animation_played
+                  and (self._evey_animation is None
+                       or self._evey_animation.timeline.currentValue() >= 0.5))
+        if active != self._evernight_active:
+            self._evernight_active = active
+            set_accent_color(EVERNIGHT_RED if active else MARCH7TH_PINK)
+            self.setWindowTitle(self._assistant_name())
+            self._refreshDesktopTwinIndicators()
+            set_application_icon(self, application_icon_path(active), self._assistant_name())
+        self._evey_title_decoration.setActive(active)
+        self.settingInterface.themeCard.setEvernightMode(active)
+        self._evey_settings_decoration.setActive(active)
+        self.homeInterface.setEvernightMode(active, animate=self._evey_animation is not None)
         self._refreshWindowTitleBar()
+        # 先让深色三月七界面重绘，再播放首次替换动画。
+        if selected and not self._evernight.animation_played:
+            QTimer.singleShot(0, self._play_evey_animation)
+
+    def _on_logo_clicked(self):
+        result = self._evernight.record_click()
+        if result == 'warning':
+            self.homeInterface.banner.logoHint.play()
+            return
+        if result != 'unlocked':
+            return
+        self.homeInterface.banner.logoHint.dismiss()
+        # No optional artwork is decoded at startup, on theme/config reload, or on the first hint.
+        try:
+            evernight_artwork()
+        except OSError as error:
+            self._evernight.unlocked = False  # Do not expose a broken option on later settings rebuilds.
+            log.warning(f'无法加载长夜月彩蛋，保留当前主题：{error}')
+            return
+        combo = self.settingInterface.themeCard.comboBox
+        combo.addItem(tr('长夜'), userData='evernight')
+        combo.setCurrentIndex(combo.findData('evernight'))
+
+    def _play_evey_animation(self):
+        if not self.isVisible() or self.isMinimized():
+            return
+        if not self._evernight.consume_animation(self._evernight.selected):
+            return
+        animation = EveyAnimation(self)
+        self._evey_animation = animation
+        animation.midpointReached.connect(self._on_theme_changed)
+        animation.closed.connect(self._on_evey_animation_closed)
+        if animation.sprite.isNull():
+            animation.close()  # A missing intro alone need not prevent the prepared theme from working.
+        else:
+            animation.play()
+
+    def _on_evey_animation_closed(self):
+        self._evey_animation = None
+        if not self._evernight_active or not self._evernight.selected:
+            self._on_theme_changed()
 
     def _on_update_version_badge_clicked(self):
         if self.detected_update_version:
@@ -286,10 +496,11 @@ class MainWindow(MSFluentWindow):
         signalBus.startTaskSignal.connect(self._onStartTask)
         # 连接热键配置改变信号
         signalBus.hotkeyChangedSignal.connect(self._onHotkeyChanged)
-        # 连接 UI 语言改变信号（用于提示重启生效）
+        # 连接 UI 语言改变信号
         signalBus.uiLanguageChanged.connect(self._on_ui_language_changed)
         # 连接任务完成信号
-        self.logInterface.taskFinished.connect(self._onTaskFinished)
+        self.logInterface.taskSequenceFinished.connect(self._onTaskFinished)
+        self.logInterface.taskStarted.connect(self._cancelTaskExit)
         # 连接自动对话切换信号
         self.logInterface.autoplotToggleRequested.connect(self._onAutoplotToggleRequested)
 
@@ -315,12 +526,6 @@ class MainWindow(MSFluentWindow):
         #     self._on_config_file_changed,
         #     NavigationItemPosition.BOTTOM)
 
-        # self.navigationInterface.addWidget(
-        #     'themeButton',
-        #     NavigationBarPushButton(FIF.BRUSH, '主题', isSelectable=False),
-        #     lambda: toggleTheme(lazy=True),
-        #     NavigationItemPosition.BOTTOM)
-
         self.navigationInterface.addWidget(
             'avatar',
             NavigationBarPushButton(FIF.HEART, tr('赞赏'), isSelectable=False),
@@ -333,18 +538,29 @@ class MainWindow(MSFluentWindow):
             NavigationItemPosition.BOTTOM
         )
 
-        self.addSubInterface(self.settingInterface, FIF.SETTING, tr('设置'), position=NavigationItemPosition.BOTTOM)
+        # 回调每次读取当前实例，替换设置页时不删除导航项或污染导航历史。
+        self.settingInterface.setProperty('isStackedTransparent', False)
+        self.stackedWidget.addWidget(self.settingInterface)
+        self.navigationInterface.addItem(
+            routeKey=self.settingInterface.objectName(), icon=FIF.SETTING, text=tr('设置'),
+            onClick=lambda: self.switchTo(self.settingInterface), position=NavigationItemPosition.BOTTOM
+        )
+        self._evey_settings_decoration = EveyControlDecoration(
+            self.navigationInterface.widget('settingInterface'),
+            'evey-decoration-upright.png', (-4, -9, 4, 3))
 
         self.splashScreen.finish()
-        self.themeListener = checkThemeChange(self)
 
+        # 免责声明可能退出进程，要先于后台线程：线程运行时退出会触发 Qt Fatal 中止
         if not cfg.get_value(base64.b64decode("YXV0b191cGRhdGU=").decode("utf-8")):
             disclaimer(self)
+
+        self.themeListener = checkThemeChange(self)
 
     def initSystemTray(self):
         """初始化系统托盘"""
         self.tray_icon = QSystemTrayIcon(self)
-        self.tray_icon.setIcon(QIcon('./assets/logo/March7th.ico'))
+        self.tray_icon.setIcon(self.windowIcon())
         self.tray_icon.setToolTip('March7th Assistant')
 
         # 创建托盘菜单
@@ -360,6 +576,11 @@ class MainWindow(MSFluentWindow):
         run_action = QAction(tr('完整运行'), self)
         run_action.triggered.connect(self.startFullTask)
         tray_menu.addAction(run_action)
+
+        if sys.platform == "win32" and not in_desktop_twin():
+            self._desktop_twin_tray_action = QAction(tr("桌面分身"), self)
+            self._desktop_twin_tray_action.triggered.connect(self.toolsInterface.openDesktopTwin)
+            tray_menu.addAction(self._desktop_twin_tray_action)
 
         tray_menu.addSeparator()
 
@@ -382,6 +603,7 @@ class MainWindow(MSFluentWindow):
         quit_action.triggered.connect(self.quitApp)
         tray_menu.addAction(quit_action)
 
+        self._tray_actions = (show_action, run_action, setting_action, quit_action)
         self.tray_icon.setContextMenu(tray_menu)
         if sys.platform == 'win32':
             self.tray_icon.activated.connect(self.onTrayIconActivated)
@@ -401,6 +623,8 @@ class MainWindow(MSFluentWindow):
             self._defer_startup_checks = False
             checkUpdate(self, flag=True)
             checkAnnouncement(self)
+        if self._evernight.unlocked and not self._evernight.animation_played:
+            QTimer.singleShot(0, self._play_evey_animation)
 
     def _show_main_window(self):
         """显示主界面，macOS 下确保窗口置顶"""
@@ -426,7 +650,6 @@ class MainWindow(MSFluentWindow):
 
     def handle_external_activate(self, task=None, exit_on_complete=False):
         """响应来自其他实例的激活请求：置顶窗口并根据需要启动任务或设置退出行为"""
-        from PySide6.QtCore import QTimer
         try:
             # 显示并置顶窗口
             self.showNormal()
@@ -450,6 +673,18 @@ class MainWindow(MSFluentWindow):
 
     def _onStartTask(self, command):
         """处理任务启动信号"""
+        if self._desktop_twin_hosting:
+            # 快捷方式或其他实例转来的任务请求不能静默丢弃
+            InfoBar.warning(
+                title=tr('桌面分身运行中'),
+                content=tr('主界面暂停期间无法启动任务，请在分身内的小助手中运行'),
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.BOTTOM,
+                duration=5000,
+                parent=self
+            )
+            return
         # 检查是否有任务正在运行
         if self.logInterface.isTaskRunning():
             InfoBar.warning(
@@ -476,6 +711,18 @@ class MainWindow(MSFluentWindow):
         from tasks.base.tasks import start_task
         start_task("main")
 
+    def refreshBackendTasks(self):
+        connection = display_connection(cfg)
+        changed = connection != self._backend_connection
+        if changed:
+            stop_plot()
+            if connection.error is None:
+                auto.reload_connection()
+                screen.reload_profile()
+            self._backend_connection = connection
+        self.homeInterface.refreshBackendTasks()
+        self.toolsInterface.refreshBackendTasks(connection_changed=changed)
+
     def _onHotkeyChanged(self):
         """处理热键配置改变信号"""
         if hasattr(self, 'logInterface'):
@@ -485,45 +732,143 @@ class MainWindow(MSFluentWindow):
 
     def _onAutoplotToggleRequested(self):
         """处理自动对话切换请求（全局热键触发）"""
-        if hasattr(self, 'toolsInterface'):
+        if not self._desktop_twin_hosting and hasattr(self, 'toolsInterface'):
             self.toolsInterface.toggleAutoPlot()
 
+    def checkDesktopTwinReady(self):
+        from utils.runs import read_active_run
+
+        game_launch = getattr(self, "game_launch_thread", None)
+        if (self.logInterface.autoCloseBlockReason(preserve_schedule=False) or read_active_run()
+                or (game_launch is not None and game_launch.isRunning())):
+            raise RuntimeError(tr("请先结束主桌面的任务再连接分身"))
+
+    def setDesktopTwinHosting(self, active):
+        """把定时和共享设置的写入权交给分身 GUI，注销后恢复主界面。"""
+        self._desktop_twin_hosting = active
+        cfg.writes_suspended = active
+        self._cancelTaskExit()
+        self.logInterface.setDesktopTwinHosting(active)
+        for page in (self.homeInterface, self.settingInterface, self.workflowInterface,
+                     self.warpInterface, self.logInterface):
+            page.setDisabled(active)
+        start_game = self.navigationInterface.widget('startGameButton')
+        if start_game is not None:
+            start_game.setDisabled(active)
+        for action in self._tray_actions[1:3]:
+            action.setDisabled(active)
+        # 页面整体变灰时要说明原因，并给出回到分身窗口的入口
+        notice = self._ensureDesktopTwinNotice() if active else self._desktop_twin_notice
+        if notice is not None:
+            notice.setVisible(active)
+        self._refreshDesktopTwinIndicators()
+        if not active and cfg.is_config_changed():
+            self._on_config_file_changed()
+        self.toolsInterface.setDesktopTwinHosting(active)
+
+    def _ensureDesktopTwinNotice(self):
+        """在页面区域上方插入提示条，挤开页面而不是盖住页面顶部的标题和标签页。"""
+        if self._desktop_twin_notice is not None:
+            return self._desktop_twin_notice
+        from .components.notice_bar import NoticeBar
+
+        notice = NoticeBar(InfoBarIcon.INFORMATION, self, accent=True)
+        notice.openButton = PrimaryPushButton(notice)
+        notice.openButton.clicked.connect(self.toolsInterface.openDesktopTwin)
+        notice.addWidget(notice.openButton)
+        notice.hide()
+        noticeRow = QHBoxLayout()
+        noticeRow.setContentsMargins(0, 0, 12, 10)
+        noticeRow.addWidget(notice)
+        column = QVBoxLayout()
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(0)
+        index = self.hBoxLayout.indexOf(self.stackedWidget)
+        self.hBoxLayout.removeWidget(self.stackedWidget)
+        column.addLayout(noticeRow)
+        column.addWidget(self.stackedWidget, 1)
+        self.hBoxLayout.insertLayout(index, column, 1)
+        self._desktop_twin_notice = notice
+        self._refreshDesktopTwinIndicators()
+        return notice
+
+    def _refreshDesktopTwinIndicators(self):
+        hosting = self._desktop_twin_hosting
+        if self._desktop_twin_tray_action is not None:
+            self._desktop_twin_tray_action.setText(tr("桌面分身（运行中）") if hosting else tr("桌面分身"))
+        if hasattr(self, 'tray_icon'):
+            self.tray_icon.setToolTip(
+                f"{self._assistant_name()}\n{tr('桌面分身运行中')}" if hosting else self._assistant_name())
+            fit_menu_width(self.tray_icon.contextMenu())
+        notice = self._desktop_twin_notice
+        if notice is not None:
+            notice.setTitle(tr("桌面分身运行中"))
+            notice.setContent(tr("任务、定时和设置已交给分身内的小助手。为避免冲突，主界面暂停操作，注销分身后自动恢复。"))
+            notice.openButton.setText(tr("打开分身窗口"))
+
     def _on_ui_language_changed(self, lang_code: str):
-        """热重载 UI 语言，无需重启。
-        流程：更新翻译字典 → 禁用导航栏 → 切到安全锚点 → 等动画结束 → 分步重建界面。
-        """
-        from PySide6.QtCore import QTimer
+        """合并连续选择；等下拉菜单退出回调后再刷新，不主动导航。"""
+        self._pending_ui_language = lang_code
+        self._language_change_timer.start(0)
+
+    def _can_replace_settings(self):
+        # 导航动画保存的是页面索引，运行期间不能增删页面。
+        # 模态编辑和 QQ 绑定回调也必须结束，避免丢失编辑或销毁运行中的 QThread。
+        return not (
+            self._navigation_animation_running
+            or QApplication.activeModalWidget()
+            or QApplication.activePopupWidget()
+            or getattr(self.settingInterface, '_qqbotBindPending', False)
+            or any(thread.isRunning() for thread in self.settingInterface.findChildren(QThread))
+        )
+
+    def _replace_settings_interface(self, replacement, state):
+        """新页面已成功构建后才替换旧页，期间不发出导航事件。"""
+        old = self.settingInterface
+        was_current = self.stackedWidget.currentWidget() is old
+        replacement.setProperty('isStackedTransparent', False)
+        replacement.resize(old.size())
+        animation_enabled = self.stackedWidget.isAnimationEnabled()
         try:
-            from module.localization import load_language, detect_lang
+            with QSignalBlocker(self.stackedWidget):
+                self.stackedWidget.setAnimationEnabled(False)
+                self.stackedWidget.addWidget(replacement)
+                try:
+                    if was_current:
+                        # 绕过 Fluent 的 switchTo，它会清零滚动位置。
+                        self.stackedWidget.view.setCurrentWidget(replacement)
+                    replacement.restoreViewState(state)
+                except Exception:
+                    if was_current:
+                        self.stackedWidget.view.setCurrentWidget(old)
+                    self.stackedWidget.removeWidget(replacement)
+                    raise
+                self.stackedWidget.removeWidget(old)
+                self.settingInterface = replacement
+            self._updateStackedBackground()
+        finally:
+            self.stackedWidget.setAnimationEnabled(animation_enabled)
+        old.hide()
+        old.deleteLater()
 
-            actual_lang = lang_code
-            if actual_lang == 'auto':
-                actual_lang = detect_lang()
-
-            cfg.ui_language_now = actual_lang
-            load_language(actual_lang)
-            self._reinstall_fluent_translator(actual_lang)
-            self._refreshWindowTitleBar()
-            if hasattr(self, 'logInterface') and self.logInterface:
-                self.logInterface.setDetectedUpdateVersion(self.detected_update_version)
-
-            # 禁用导航栏，防止重建期间误操作
-            self.navigationInterface.setEnabled(False)
-
-            # 先切到日志界面（安全锚点）；等 350ms 让导航动画完全结束后再重建
-            self.switchTo(self.logInterface)
-            QTimer.singleShot(350, self._rebuild_interfaces_for_language)
-        except Exception as e:
-            self.navigationInterface.setEnabled(True)
-            InfoBar.warning(
-                title=tr('语言切换失败'),
-                content=str(e),
-                orient=Qt.Horizontal,
-                isClosable=True,
-                position=InfoBarPosition.TOP,
-                duration=3000,
-                parent=self
-            )
+    def _retranslate_persistent_interfaces(self):
+        for interface in (self.homeInterface, self.helpInterface, self.warpInterface,
+                          self.toolsInterface, self.workflowInterface, self.logInterface):
+            position = interface.verticalScrollBar().value()
+            interface.retranslateUi()
+            interface.verticalScrollBar().setValue(position)
+        labels = {
+            'homeInterface': tr('主页'), 'helpInterface': tr('帮助'),
+            'warpInterface': tr('抽卡记录'), 'toolsInterface': tr('工具箱'),
+            'workflowInterface': tr('流程编排'), 'logInterface': tr('日志'),
+            'settingInterface': tr('设置'), 'startGameButton': tr('启动游戏'), 'avatar': tr('赞赏'),
+        }
+        for route, text in labels.items():
+            self.navigationInterface.widget(route).setText(text)
+        for action, text in zip(self._tray_actions, [tr('显示主界面'), tr('完整运行'), tr('设置'), tr('退出')]):
+            action.setText(text)
+        self._refreshDesktopTwinIndicators()
+        self._refreshWindowTitleBar()
 
     def _reinstall_fluent_translator(self, lang_code: str):
         """重新安装 FluentTranslator 以使 Qt 内置组件翻译同步更新"""
@@ -538,126 +883,104 @@ class MainWindow(MSFluentWindow):
         app.installTranslator(self._fluent_translator)
 
     def _rebuild_interfaces_for_language(self):
-        """同步重建所有子界面以应用新语言。
+        """状态型页面原位翻译；设置页先构建，再在原位置无动画替换。"""
+        if self._pending_ui_language is None:
+            return
+        if not self._can_replace_settings():
+            self._language_change_timer.start(100)
+            return
 
-        性能策略：
-        - TOP 界面（Home/Help/Warp/Tools）构造轻量，先重建完毕
-        - 重建完 TOP 界面后调用一次 processEvents()，让 Windows 消息队列清空，
-          防止在最重的 SettingInterface 构建期间出现"(不响应)"标题
-        - SettingInterface 构建完成后立即 switchTo 并还原光标
-        - 全程不重新连接信号（initInterface 中已连接且永久有效）
-        """
+        from module.localization import load_language, detect_lang, get_current_language
+        lang_code = self._pending_ui_language
+        self._pending_ui_language = None
+        previous_lang = get_current_language()
+        previous_setting = cfg.get_value('ui_language', 'auto')
+        replacement = None
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        QApplication.processEvents()  # 立即刷新，让光标实际渲染后再开始重建
         try:
-            # ── 轻量 TOP 界面：逐一移除旧→添加新 ───────────────────────
-            top_specs = [
-                ('homeInterface', FIF.HOME, tr('主页'), HomeInterface),
-                ('helpInterface', FIF.BOOK_SHELF, tr('帮助'), HelpInterface),
-                ('warpInterface', FIF.SHARE, tr('抽卡记录'), WarpInterface),
-                ('toolsInterface', FIF.DEVELOPER_TOOLS, tr('工具箱'), ToolsInterface),
-                ('workflowInterface', FIF.CODE, tr('流程编排'), WorkflowInterface),
-            ]
-            for attr, icon, label, cls in top_specs:
-                old = getattr(self, attr, None)
-                if old is not None:
-                    try:
-                        route_key = old.objectName()
-                        if route_key in self.navigationInterface.items:
-                            self.navigationInterface.items[route_key].hide()
-                        self.removeInterface(old, isDelete=True)
-                    except Exception:
-                        pass
-                try:
-                    new_iface = cls(self)
-                    setattr(self, attr, new_iface)
-                    self.addSubInterface(new_iface, icon, label)
-                except Exception:
-                    pass
-
-            # ── 轻量界面完成后清空 Windows 消息队列 ──────────────────
-            # 调用一次 processEvents()，避免在随后最重的 SettingInterface
-            # 构建期间因 WM_PAINT 积压 >5s 而触发系统"(不响应)"弹窗。
-            # 仅此一次，不在循环中调用，不会引起多余重绘。
-            QApplication.processEvents()
-
-            # ── 日志界面：保留进程，只更新导航标签 ──────────────────
-            try:
-                log_key = self.logInterface.objectName()
-                log_item = self.navigationInterface.items.get(log_key)
-                if log_item is not None and hasattr(log_item, 'setText'):
-                    log_item.setText(tr('日志'))
-            except Exception:
-                pass
-
-            # ── 设置界面（最重）：移除旧→创建新 ──────────────────────
-            old_setting = self.settingInterface
-            try:
-                route_key = old_setting.objectName()
-                if route_key in self.navigationInterface.items:
-                    self.navigationInterface.items[route_key].hide()
-                self.removeInterface(old_setting, isDelete=True)
-            except Exception:
-                pass
-            try:
-                self.settingInterface = SettingInterface(self)
-                self.addSubInterface(
-                    self.settingInterface, FIF.SETTING, tr('设置'),
-                    position=NavigationItemPosition.BOTTOM
-                )
-            except Exception:
-                pass
-
-            # ── 导航栏自定义按钮文本 ──────────────────────────────────
-            for widget_key, text_key in [('startGameButton', '启动游戏'), ('avatar', '赞赏')]:
-                try:
-                    btn = self.navigationInterface.widget(widget_key)
-                    if btn and hasattr(btn, 'setText'):
-                        btn.setText(tr(text_key))
-                except Exception:
-                    pass
-
-            self.navigationInterface.setEnabled(True)
-            try:
-                self.switchTo(self.settingInterface)
-            except Exception:
-                pass
-
+            if lang_code != previous_setting:
+                cfg.set_value('ui_language', lang_code)
+            actual_lang = detect_lang() if lang_code == 'auto' else lang_code
+            cfg.ui_language_now = actual_lang
+            load_language(actual_lang)
+            self._reinstall_fluent_translator(actual_lang)
+            state = self.settingInterface.captureViewState()
+            # 不提前移除旧页，也不调用 processEvents：构造失败时旧页仍完整可用，
+            # 任务/热键/配置回调不会在半替换状态下重入。
+            replacement = SettingInterface(self)
+            self._retranslate_persistent_interfaces()
+            self._replace_settings_interface(replacement, state)
+            replacement = None
+            self.refreshBackendTasks()
             InfoBar.success(
-                title=tr('更新成功'),
-                content='',
-                orient=Qt.Horizontal,
-                isClosable=True,
-                position=InfoBarPosition.TOP,
-                duration=1500,
-                parent=self
+                title=tr('更新成功'), content='', orient=Qt.Horizontal,
+                isClosable=True, position=InfoBarPosition.TOP, duration=1500, parent=self
             )
         except Exception as e:
+            # 原位回滚运行时语言、持久配置及旧页面的选择，允许重选同一语言。
+            cfg.ui_language_now = previous_lang
+            load_language(previous_lang)
             import traceback
-            traceback.print_exc()
+            log.error(f'切换界面语言失败: {e}\n{traceback.format_exc()}')
+            try:
+                if cfg.get_value('ui_language', 'auto') != previous_setting:
+                    cfg.set_value('ui_language', previous_setting)
+            except Exception:
+                log.error(f'还原界面语言配置失败\n{traceback.format_exc()}')
+            combo = self.settingInterface.languageCard.comboBox
+            with QSignalBlocker(combo):
+                combo.setCurrentIndex(combo.findData(previous_setting))
+            try:
+                self._reinstall_fluent_translator(previous_lang)
+                self._retranslate_persistent_interfaces()
+            except Exception:
+                log.error(f'还原界面文案失败\n{traceback.format_exc()}')
             InfoBar.warning(
-                title=tr('配置加载失败'),
-                content=str(e),
-                orient=Qt.Horizontal,
-                isClosable=True,
-                position=InfoBarPosition.TOP,
-                duration=3000,
-                parent=self
+                title=tr('语言切换失败'), content=str(e), orient=Qt.Horizontal,
+                isClosable=True, position=InfoBarPosition.TOP, duration=3000, parent=self
             )
         finally:
-            self.navigationInterface.setEnabled(True)
+            if replacement is not None:
+                replacement.hide()
+                replacement.deleteLater()
             QApplication.restoreOverrideCursor()
 
+    def _cancelTaskExit(self):
+        self._task_exit_timer.stop()
+        self._task_exit_pending = False
+        self._task_exit_requested_by_cli = False
+
     def _onTaskFinished(self, exit_code):
-        """处理任务完成信号"""
-        # 如果是启动任务且设置了完成后退出，则在任务成功完成时退出程序
-        if self.exit_on_complete and self.startup_task and exit_code == 0:
-            from PySide6.QtCore import QTimer
-            # 延迟一小段时间让用户看到完成状态
-            QTimer.singleShot(5000, self.quitApp)
-        else:
-            # 任务失败或未指定退出时，清除自动退出标记
-            self.exit_on_complete = False
+        """仅在整次运行全部成功、没有需要保留的后台工作时关闭助手。"""
+        self._cancelTaskExit()
+        requested_by_cli = bool(self.exit_on_complete and self.startup_task)
+        self.exit_on_complete = False
+        if exit_code != 0:
+            return
+        if not requested_by_cli and not cfg.get_value('exit_app_after_success', False):
+            return
+        reason = self.logInterface.autoCloseBlockReason(preserve_schedule=not requested_by_cli)
+        if reason:
+            self.logInterface.appendLog(f"本次不自动关闭助手：{reason}。\n")
+            return
+        self._task_exit_requested_by_cli = requested_by_cli
+        self._task_exit_pending = True
+        self.logInterface.appendLog("全部任务已成功完成，5 秒后关闭助手；启动新任务可取消。\n")
+        self._task_exit_timer.start(self.TASK_EXIT_DELAY_MS)
+
+    def _quitAfterTask(self):
+        # stop() 不能撤回已经排队的回调，因此还需检查请求是否仍有效。
+        if not self._task_exit_pending:
+            return
+        requested_by_cli = self._task_exit_requested_by_cli
+        self._cancelTaskExit()
+        if not requested_by_cli and not cfg.get_value('exit_app_after_success', False):
+            return
+        reason = self.logInterface.autoCloseBlockReason(preserve_schedule=not requested_by_cli)
+        if reason:
+            self.logInterface.appendLog(f"已取消自动关闭助手：{reason}。\n")
+            return
+        self.quitApp()
 
     def quitApp(self):
         """退出应用程序"""
@@ -688,13 +1011,19 @@ class MainWindow(MSFluentWindow):
 
     def _on_config_file_changed(self):
         """重新加载配置文件并刷新界面"""
+        if self._desktop_twin_hosting:
+            return
+        replacement = None
         try:
-            # 检查当前是否在设置界面
-            is_in_setting_interface = self.stackedWidget.currentWidget() == self.settingInterface
+            if not self._can_replace_settings() or self._pending_ui_language is not None:
+                self._config_reload_timer.start(100)
+                return
+            self._config_reload_timer.stop()
 
             # 重新加载配置
             log.info("[config-watch] 重新加载配置文件并刷新界面")
             cfg._load_config(None, save=False)
+            applyTheme(self)
 
             # 重新初始化通知器
             try:
@@ -707,25 +1036,12 @@ class MainWindow(MSFluentWindow):
             if hasattr(self, 'logInterface'):
                 self.logInterface.reloadConfigState()
 
-            # 保存旧的设置界面引用
-            old_setting_interface = self.settingInterface
-            route_key = old_setting_interface.objectName()
-
-            # 创建新的设置界面
-            self.settingInterface = SettingInterface(self)
-
-            # 必须先把旧的导航栏隐藏，否则会导致最后的高度增加（bug）
-            self.navigationInterface.items[route_key].hide()
-
-            # 移除旧的设置界面
-            self.removeInterface(old_setting_interface, isDelete=True)
-
-            # 添加新的设置界面
-            self.addSubInterface(self.settingInterface, FIF.SETTING, '设置', position=NavigationItemPosition.BOTTOM)
-
-            # 只有在重新加载配置前是在设置界面时，才切换到新的设置界面
-            if is_in_setting_interface:
-                self.switchTo(self.settingInterface)
+            state = self.settingInterface.captureViewState()
+            replacement = SettingInterface(self)
+            self._replace_settings_interface(replacement, state)
+            replacement = None
+            if display_connection(cfg) != self._backend_connection:
+                self.refreshBackendTasks()
 
             # 只有在窗口可见时才显示提示
             if self.isVisible():
@@ -750,6 +1066,10 @@ class MainWindow(MSFluentWindow):
                     duration=3000,
                     parent=self
                 )
+        finally:
+            if replacement is not None:
+                replacement.hide()
+                replacement.deleteLater()
 
     def _stopThemeListener(self):
         """停止主题监听线程"""
@@ -773,6 +1093,12 @@ class MainWindow(MSFluentWindow):
         """执行退出前的清理并退出程序
         e: 可选的 QCloseEvent，用于调用 e.accept()
         """
+        close_twin = getattr(getattr(self, "toolsInterface", None), "closeDesktopTwin", None)
+        if close_twin and not close_twin():
+            if e is not None:
+                e.ignore()
+            return
+        self._cancelTaskExit()
         # 保存窗口尺寸和最大化状态
         log.info(f"[config-save] 主程序退出，保存窗口状态 PID={os.getpid()}（更新期间此处会与更新器并发写配置）")
         self._saveWindowState()
@@ -862,6 +1188,25 @@ class MainWindow(MSFluentWindow):
             )
 
     def startGame(self):
+        if self._desktop_twin_hosting:
+            return
+        connection = display_connection(cfg)
+        if connection.error:
+            InfoBar.warning(title=tr('启动失败'), content=connection.error, orient=Qt.Horizontal,
+                            position=InfoBarPosition.TOP, duration=5000, parent=self)
+            return
+        if connection.control_backend == "adb":
+            # 设备会话属于任务进程，在界面进程里启动游戏会一直占着设备端服务。
+            InfoBar.info(
+                title=tr('Android 设备不需要单独启动游戏'),
+                content=tr('运行任务时会自动在设备上启动游戏'),
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=5000,
+                parent=self
+            )
+            return
         start_game_button = self.navigationInterface.widget('startGameButton')
         if start_game_button:
             start_game_button.setEnabled(False)
@@ -902,7 +1247,8 @@ class MainWindow(MSFluentWindow):
         else:
             from tasks.game.starrailcontroller import StarRailController
             starrail = StarRailController(cfg=cfg, logger=log)
-            if cfg.auto_battle_detect_enable:
+            # 桌面分身与主桌面共用游戏设置，手动启动游戏也不改写自动战斗和二倍速。
+            if not in_desktop_twin() and game_option_enabled(cfg, "auto_battle_detect_enable"):
                 starrail.change_auto_battle(True)
 
         self.game_launch_thread = GameLaunchThread(game, cfg)
@@ -943,7 +1289,7 @@ class MainWindow(MSFluentWindow):
         elif result == GameStartStatus.LOCAL_LAUNCH_FAIL:
             InfoBar.warning(
                 title=tr('游戏路径配置错误(╥╯﹏╰╥)'),
-                content=tr("请在“设置”→“程序”中配置"),
+                content=tr("请在“设置”→“游戏连接”中配置正确的游戏路径"),
                 orient=Qt.Horizontal,
                 isClosable=True,
                 position=InfoBarPosition.TOP,

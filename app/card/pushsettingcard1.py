@@ -107,22 +107,29 @@ class PushSettingCardAction(SettingCard):
 
 
 class PushSettingCardStr(CustomPushSettingCard):
-    def __init__(self, text, icon: Union[str, QIcon, FluentIconBase], title, configname, parent=None, empty_content=None):
+    def __init__(self, text, icon: Union[str, QIcon, FluentIconBase], title, configname,
+                 parent=None, empty_content=None, *, password=False):
         self.empty_content = empty_content
-        self.configvalue = str(cfg.get_value(configname))
+        self.password = password
+        self.configvalue = str(cfg.get_value(configname) or "")
         super().__init__(text, icon, title, configname, self._display_value(self.configvalue), parent)
         self.button.clicked.connect(self.__onclicked)
 
     def _display_value(self, value):
+        if self.password:
+            return ""
         if value == "" and self.empty_content is not None:
             return self.empty_content
         return value
 
     def __onclicked(self):
-        message_box = MessageBoxEdit(self.title, self.configvalue, self.window())
+        message_box = MessageBoxEdit(self.title, self.configvalue, self.window(), password=self.password)
         if message_box.exec():
-            cfg.set_value(self.configname, message_box.getText())
-            self.configvalue = message_box.getText()
+            value = message_box.getText()
+            if self.password:
+                value = value.strip()
+            cfg.set_value(self.configname, value)
+            self.configvalue = value
             self.contentLabel.setText(self._display_value(self.configvalue))
 
 
@@ -849,6 +856,7 @@ class PushSettingCardPowerPlan(CustomPushSettingCard):
             self.configvalue,
             self.window(),
             keep_plan=cfg.get_value("power_plan_keep", False),
+            continue_after_plan=cfg.get_value("power_plan_continue", True),
         )
         if message_box.exec():
             plans = message_box.get_plans()
@@ -856,6 +864,7 @@ class PushSettingCardPowerPlan(CustomPushSettingCard):
             cfg.set_values({
                 self.configname: plans,
                 "power_plan_keep": message_box.should_keep_plan(),
+                "power_plan_continue": message_box.should_continue_after_plan(),
             })
             self.contentLabel.setText(self._get_display_text())
 

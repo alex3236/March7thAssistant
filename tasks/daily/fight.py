@@ -1,5 +1,8 @@
 from module.screen import screen
 from module.config import cfg
+from module.config.platform import get_control_backend
+from module.game import cloud_game, require_desktop_task
+from module.localization import tr
 from module.logger import log
 from module.notification.notification import NotificationLevel
 from tasks.base.base import Base
@@ -74,6 +77,7 @@ class Fight:
 
     @staticmethod
     def before_start():
+        require_desktop_task(cfg, tr("锄大地"))
         Fight.check_path()
         if cfg.fight_operation_mode == "source":
             PythonChecker.run()
@@ -88,7 +92,7 @@ class Fight:
             log.warning("锄大地功能仅支持 Windows 平台")
             return False
 
-        if cfg.cloud_game_enable and cfg.browser_headless_enable:
+        if get_control_backend(cfg) == "cloud" and cloud_game.is_headless():
             log.error("锄大地不支持无界面模式运行")
             return False
 

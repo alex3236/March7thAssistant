@@ -11,6 +11,7 @@ from datetime import datetime
 
 from module.automation import auto
 from module.config import cfg
+from module.game.adb_transport import AdbError
 from module.logger import log
 from module.localization import tr
 from module.notification import notif
@@ -344,6 +345,15 @@ def build_workflow_task(workflow_name: str, step_path=None, timeout: int = 0, na
     if name:
         task["name"] = name
     return task
+
+
+def format_workflow_task_name(workflow_name: str, step: dict | None = None) -> str:
+    """按当前语言生成系统文案，保留用户流程名和步骤中的用户内容。"""
+    name = workflow_name
+    if step is not None:
+        title, _ = summarize_step(step)
+        name = f"{name} - {title}"
+    return f"{tr('流程编排')} - {name}"
 
 
 def get_workflow_directory(workflow=None) -> str | None:
@@ -1013,12 +1023,13 @@ class WorkflowRunner:
         self.last_result = False
         self.current_workflow = normalized
         self._log("开始执行流程：" + normalized['name'])
-        success, _ = self._execute_steps(normalized["steps"], 0)
+        self._execute_steps(normalized["steps"], 0)
         if self.stop_requested:
             self._log("流程已停止")
             return False
         self._log("流程执行完成")
-        return success
+        # 流程是否完成与用于条件判断的最后一步结果独立。
+        return True
 
     def _log(self, message: str):
         self.log_callback(message)
@@ -1056,6 +1067,9 @@ class WorkflowRunner:
             self._log(f"{'  ' * depth}[{index}/{len(steps)}] {title}")
             try:
                 self.last_result, loop_control = self._execute_step(step, depth, in_loop)
+            except AdbError:
+                self.last_result = False
+                raise
             except Exception as exc:
                 self.last_result = False
                 loop_control = None
@@ -1065,7 +1079,7 @@ class WorkflowRunner:
                 return self.last_result, loop_control
             if self.stop_requested:
                 return False, None
-        return True, None
+        return self.last_result if steps else True, None
 
     def _execute_step(self, step: dict, depth: int, in_loop: bool = False) -> tuple[bool, str | None]:
         normalized = normalize_step(step)
@@ -1263,6 +1277,8 @@ class WorkflowRunner:
 
         try:
             return bool(auto.drag_mouse(start, end, step.get("drag_duration", 0.5)))
+        except AdbError:
+            raise
         except Exception as exc:
             self._log(f"滑动鼠标失败：{exc}")
             return False
@@ -1330,6 +1346,8 @@ class WorkflowRunner:
                         screenshot, _, _ = result
                         image = screenshot
                     self._log("消息通知：包含截图")
+                except AdbError:
+                    raise
                 except Exception as e:
                     self._log(f"获取截图失败：{e}")
 
@@ -1340,6 +1358,8 @@ class WorkflowRunner:
             )
             self._log("消息推送完成")
             return True
+        except AdbError:
+            raise
         except Exception as e:
             self._log(f"消息推送失败：{e}")
             return False
@@ -1385,6 +1405,8 @@ class WorkflowRunner:
                 self._log(f"未知按键动作：{action}")
                 return False
             return True
+        except AdbError:
+            raise
         except Exception as e:
             self._log(f"按键操作失败：{e}")
             return False

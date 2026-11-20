@@ -7,19 +7,34 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from .background_input import GameWindowLost
 from .screenshot import Screenshot
 from .debug_overlay import get_debug_overlay, DebugOverlay
 from utils.logger.logger import Logger
 from typing import Optional
 from utils.singleton import SingletonMeta
 from utils.image_utils import ImageUtils
-from utils.pause import pause_guard
+from utils.pause import pause_ctl, pause_guard
 from module.game import get_game_controller
+from module.game.adb_transport import AdbError
+from module.localization import tr
 from module.ocr import ocr
 from module.config import cfg
+from module.config.platform import InvalidGameConnection, TouchProfileInputError, get_control_backend, get_ui_profile
 
 
 _screenshot_retry_timeout = ContextVar("screenshot_retry_timeout", default=60.0)
+_TOUCH_UNSUPPORTED_INPUTS = (
+    "press_key", "press_key_down", "press_key_up", "secretly_press_key", "press_mouse", "mouse_scroll",
+)
+_INPUT_METHODS = ("mouse_click", "mouse_down", "mouse_up", "mouse_move", "mouse_drag", "secretly_write") + _TOUCH_UNSUPPORTED_INPUTS
+
+
+def _reject_touch_input(name):
+    def reject(*args, **kwargs):
+        raise TouchProfileInputError(name)
+
+    return reject
 
 
 @contextmanager
@@ -45,36 +60,54 @@ class Automation(metaclass=SingletonMeta):
         self.window_title = window_title
         self.logger = logger
         self.screenshot = None
-        self._init_input()
+        self.input_handler = None
+        self.connection = None
+        try:
+            self._init_input()
+        except InvalidGameConnection:
+            # 设置页可以先打开并修复配置，实际发出输入前仍须解析有效连接。
+            pass
         self.img_cache = {}
         self._debug_overlay = None
         self._debug_initialized = False
+
+    def __getattr__(self, name):
+        if name in _INPUT_METHODS and self.__dict__.get("input_handler") is None:
+            self._init_input()
+            return self.__dict__[name]
+        raise AttributeError(name)
 
     def _init_input(self):
         """
         初始化输入处理器，将输入操作如点击、移动等绑定至实例变量。
 
-        所有输入均包一层暂停卡点（`pause_guard`）：暂停期间任何键鼠输入都会停在发出之前。
+        支持的输入操作经过暂停卡点。不支持的操作立即报错。
         """
+        profile = get_ui_profile(cfg).name
+        backend = get_control_backend(cfg)
         previous = getattr(self, 'input_handler', None)
         if previous is not None and callable(getattr(previous, 'close', None)):
             previous.close()
         self.input_handler = get_game_controller().get_input_handler()
-        self.mouse_click = pause_guard(self.input_handler.mouse_click)
-        self.mouse_down = pause_guard(self.input_handler.mouse_down)
-        self.mouse_up = pause_guard(self.input_handler.mouse_up)
-        self.mouse_move = pause_guard(self.input_handler.mouse_move)
-        self.mouse_drag = pause_guard(self.input_handler.mouse_drag)
-        self.mouse_scroll = pause_guard(self.input_handler.mouse_scroll)
-        self.press_key = pause_guard(self.input_handler.press_key)
-        self.press_key_down = pause_guard(self.input_handler.press_key_down)
-        self.press_key_up = pause_guard(self.input_handler.press_key_up)
-        self.secretly_press_key = pause_guard(self.input_handler.secretly_press_key)
-        self.press_mouse = pause_guard(self.input_handler.press_mouse)
-        self.secretly_write = pause_guard(self.input_handler.secretly_write)
+
+        for name in _INPUT_METHODS:
+            if profile == "touch_720" and name in _TOUCH_UNSUPPORTED_INPUTS:
+                method = _reject_touch_input(name)
+            else:
+                method = pause_guard(getattr(self.input_handler, name))
+            setattr(self, name, method)
+        self.connection = backend, profile
 
     def close_input(self):
-        self.input_handler.close()
+        if self.input_handler is not None:
+            self.input_handler.close()
+
+    def reload_connection(self):
+        self.shutdown_debug()
+        self.window_title = cfg.get_value('game_title_name')
+        self.screenshot = None
+        self.ocr_result = []
+        self._init_input()
 
     def _is_debug_enabled(self):
         """检查调试模式是否启用。"""
@@ -82,10 +115,8 @@ class Automation(metaclass=SingletonMeta):
             return False
         if not bool(cfg.get_value('debug_mode_enable', False)):
             return False
-        # 云游戏无窗口模式下没有可见画面，无需显示叠加层
-        if cfg.get_value('cloud_game_enable', False) and cfg.get_value('browser_headless_enable', False):
-            return False
-        return True
+        backend = get_control_backend(cfg)
+        return backend == 'local' or (backend == 'cloud' and not cfg.get_value('browser_headless_enable', False))
 
     def _ensure_debug_overlay(self):
         """确保调试叠加层已初始化并显示。"""
@@ -187,7 +218,10 @@ class Automation(metaclass=SingletonMeta):
         """
         start_time = time.monotonic()
         timeout = _screenshot_retry_timeout.get()
+        adb = get_control_backend(cfg) == "adb"
         while True:
+            if adb:
+                pause_ctl.checkpoint()
             handler = getattr(self, 'input_handler', None)
             background = getattr(handler, 'is_background', False) is True
             if background:
@@ -211,14 +245,18 @@ class Automation(metaclass=SingletonMeta):
                         if crop != (0, 0, 1, 1):
                             self._debug_draw_crop_region(crop)
                     return result
-                elif timeout > 0:
+                elif timeout > 0 and not adb:
                     self.logger.error("截图失败：未能获取游戏窗口画面" if background else "截图失败：没有找到游戏窗口")
+            except (AdbError, GameWindowLost):
+                raise
             except Exception as e:
                 if timeout <= 0:
                     raise RuntimeError(f"截图失败：{e}") from e
                 self.logger.error(f"截图失败：{e}")
             remaining = timeout - (time.monotonic() - start_time)
             if remaining <= 0:
+                if adb:
+                    raise AdbError("frame_timeout", tr("ADB 截图超时，未取得可用的游戏画面"))
                 raise RuntimeError("截图超时")
             time.sleep(min(1, remaining))
 
@@ -251,6 +289,10 @@ class Automation(metaclass=SingletonMeta):
         :param relative: 是否返回相对位置。
         :return: 最佳匹配位置和相似度。
         """
+        profile = get_ui_profile(cfg)
+        target = profile.resolve_image_path(target)
+        if profile.name == "touch_720":
+            scale_range = None
         try:
             if cacheable and target in self.img_cache:
                 mask = self.img_cache[target]['mask']
@@ -322,6 +364,7 @@ class Automation(metaclass=SingletonMeta):
         返回:
         - 匹配的数量，或在出错时返回 None。
         """
+        target = get_ui_profile(cfg).resolve_image_path(target)
         try:
             template = ImageUtils.read_image(target, cv2.IMREAD_GRAYSCALE)
             if template is None:
@@ -336,6 +379,10 @@ class Automation(metaclass=SingletonMeta):
 
     @pause_guard
     def find_image_with_multiple_targets(self, target, threshold, scale_range, relative=False, mask_top_right_ratio=None):
+        profile = get_ui_profile(cfg)
+        target = profile.resolve_image_path(target)
+        if profile.name == "touch_720":
+            scale_range = None
         try:
             template = ImageUtils.read_image(target, cv2.IMREAD_GRAYSCALE)
             if template is None:
@@ -414,16 +461,18 @@ class Automation(metaclass=SingletonMeta):
         self.logger.debug(f"目标文字：{', '.join(targets)} 未找到匹配文字")
         return None, None
 
-    def perform_ocr(self):
-        """执行OCR识别，并更新OCR结果列表。如果未识别到文字，保留ocr_result为一个空列表。"""
+    def perform_ocr(self, *, raise_on_error=False):
+        """刷新 OCR 结果。调用方需要重试时，可以接收识别异常。"""
         try:
             self.ocr_result = ocr.recognize_multi_lines(np.array(self.screenshot))
             if not self.ocr_result:
                 self.logger.debug(f"未识别出任何文字")
                 self.ocr_result = []
         except Exception as e:
-            self.logger.error(f"OCR识别失败：{e}")
             self.ocr_result = []  # 确保在异常情况下，ocr_result为列表类型
+            if raise_on_error:
+                raise
+            self.logger.error(f"OCR识别失败：{e}")
 
     @pause_guard
     def find_text_element(self, target, include, need_ocr=True, relative=False):
@@ -889,8 +938,11 @@ class Automation(metaclass=SingletonMeta):
                 if normalized_press_duration > 0:
                     if self.mouse_down(x, y) is False:
                         return False
-                    time.sleep(normalized_press_duration)
-                    result = self.mouse_up()
+                    try:
+                        time.sleep(normalized_press_duration)
+                    finally:
+                        # 已按下的按钮必须释放，即使这时收到暂停或停止。
+                        result = self.input_handler.mouse_up()
                 else:
                     result = self.mouse_click(x, y)
             elif action == "down":
@@ -911,29 +963,53 @@ class Automation(metaclass=SingletonMeta):
 
         return True
 
-    def drag_mouse(self, start, end, duration=0.5):
-        """按归一化坐标将鼠标从 start 拖动到 end。"""
+    def drag_mouse(self, start, end, duration=0.5, end_pause=0.0, repeats=1, *, take_screenshot=True):
+        """按归一化坐标连续拖动。调用方已核对画面时可复用它的截图定位。"""
         duration = float(duration)
         if not math.isfinite(duration) or not 0 <= duration <= 60:
             raise ValueError("滑动时长必须在 0 到 60 秒之间")
+        end_pause = float(end_pause)
+        if not math.isfinite(end_pause) or not 0 <= end_pause <= 1:
+            raise ValueError("拖动末尾停留时长必须在 0 到 1 秒之间")
+        if isinstance(repeats, bool) or not isinstance(repeats, int) or not 1 <= repeats <= 10:
+            raise ValueError("连续拖动次数必须是 1 到 10 之间的整数")
         if any(not 0 <= value <= 1 for value in (*start, *end)):
             raise ValueError("坐标必须在 0 到 1 之间")
-        self.take_screenshot()
+        if take_screenshot:
+            self.take_screenshot()
+        else:
+            pause_ctl.checkpoint()
+        start_xy, end_xy = self._window_points(start, end)
+
+        if repeats != 1:
+            return bool(self.mouse_drag(*start_xy, *end_xy, duration, end_pause, repeats))
+        if end_pause:
+            return bool(self.mouse_drag(*start_xy, *end_xy, duration, end_pause))
+        return bool(self.mouse_drag(*start_xy, *end_xy, duration))
+
+    def move_mouse(self, point, *, take_screenshot=False):
+        """把指针移到归一化坐标处，不按下按键。调用方已核对画面时可复用它的截图定位。"""
+        if any(not 0 <= value <= 1 for value in point):
+            raise ValueError("坐标必须在 0 到 1 之间")
+        if take_screenshot:
+            self.take_screenshot()
+        else:
+            pause_ctl.checkpoint()
+        (x, y), = self._window_points(point)
+        return self.mouse_move(x, y) is not False
+
+    def _window_points(self, *points):
+        """把归一化坐标换算成游戏窗口内的屏幕坐标。截图可能被缩放，按窗口实际宽高换算，端点保持在窗口内。"""
         if self.screenshot is None or self.screenshot_pos is None:
             raise RuntimeError("无法获取游戏窗口尺寸")
-
         scale_factor = self.screenshot_scale_factor or 1
         width = int(self.screenshot_pos[2] / scale_factor)
         height = int(self.screenshot_pos[3] / scale_factor)
         if width <= 0 or height <= 0:
             raise RuntimeError("无法获取游戏窗口尺寸")
         offset_x, offset_y = self.screenshot_pos[:2]
-        start_xy = (offset_x + min(int(start[0] * width), width - 1),
-                    offset_y + min(int(start[1] * height), height - 1))
-        end_xy = (offset_x + min(int(end[0] * width), width - 1),
-                  offset_y + min(int(end[1] * height), height - 1))
-
-        return bool(self.mouse_drag(*start_xy, *end_xy, duration))
+        return tuple((offset_x + min(int(x * width), width - 1), offset_y + min(int(y * height), height - 1))
+                     for x, y in points)
 
     def click_element(self, target, find_type, threshold=None, max_retries=1, crop=(0, 0, 1, 1), take_screenshot=True, relative=False, scale_range=None, include=None, need_ocr=True, source=None, source_type=None, pixel_bgr=None, position="bottom_right", offset=(0, 0), action="click", retry_delay: float = 1.0, use_background_screenshot=None, press_duration: float = 0.0, prefer_frame_screenshot=True):
         """

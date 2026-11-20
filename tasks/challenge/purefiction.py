@@ -8,6 +8,7 @@ from module.screen import screen
 from module.automation import auto
 from module.config import cfg
 from module.logger import log
+from tasks.base.task_steps import optional_reward
 
 
 class PureFiction(BaseChallenge):
@@ -41,6 +42,7 @@ class PureFiction(BaseChallenge):
 
         if not auto.find_element(self.name, "text", max_retries=10, crop=(689.0 / 1920, 285.0 / 1080, 970.0 / 1920, 474.0 / 1080), include=True):
             return False
+        # 星启模式改在关卡页判断最高关星数（StellarChallenge._open_highest_level）。
         if not self.stellar.enabled and self.check_star_in_ocr_results(auto.ocr_result):
             self.save_timestamp_into_config()
             return False
@@ -252,6 +254,7 @@ class PureFiction(BaseChallenge):
         log.error("结算后返回虚构叙事失败")
         raise RuntimeError("结算后返回虚构叙事失败")
 
+    @optional_reward("虚构叙事奖励")
     def collect_rewards(self):
         '''领取奖励'''
         if self.max_level > 0:
