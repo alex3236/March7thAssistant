@@ -18,7 +18,7 @@ from module.game.adb_transport import AdbError
 from module.automation.background_input import GameWindowLost, InputInterrupted
 from module.config import cfg
 from module.config.platform import ProfileAssetNotFoundError, TouchProfileInputError, get_control_backend, get_ui_profile
-from module.localization import tr
+from module.localization import get_raw_instance_names, tr
 from module.ocr import ocr
 from utils.pause import pause_ctl
 
@@ -218,7 +218,8 @@ class Screen(metaclass=SingletonMeta):
                         if future.result() is not None:
                             break
                 finally:
-                    executor.shutdown(wait=False, cancel_futures=True)
+                    # 后续导航会替换 auto.screenshot；等待已开始的识别结束，避免它们读到下一步的局部截图。
+                    executor.shutdown(wait=True, cancel_futures=True)
             else:
                 for name, screen in screen_map.items():
                     find_screen(name, screen)
@@ -240,7 +241,10 @@ class Screen(metaclass=SingletonMeta):
                 self.logger.debug("未识别出任何界面，请确保游戏画面干净")
                 break
 
-        self.logger.error("当前界面：未知")
+        if get_control_backend(cfg) == "adb":
+            self.logger.debug("当前界面：未知")
+        else:
+            self.logger.error("当前界面：未知")
         return False
 
     def find_shortest_path(self, start, end):
@@ -372,7 +376,20 @@ class Screen(metaclass=SingletonMeta):
                 pixels = np.asarray(frame.crop(tuple(region["crop"])))
                 lines = ocr.recognize_multi_lines(pixels) or ()
                 pause_ctl.check_stop()
-                if not any("".join(text.split()) == region["text"] for _, (text, _) in lines):
+                if "instance_types" in region:
+                    # 与副本入口使用同一份名称目录；赤萼页面显示花蕾名，其他类型显示副本名。
+                    catalog = get_raw_instance_names()
+                    targets = tuple(
+                        name.replace("2", "")
+                        for kind in region["instance_types"]
+                        for name in (catalog[kind].values() if kind == "拟造花萼（赤）" else catalog[kind])
+                        if name not in ("无", "跳过")
+                    )
+                else:
+                    targets = (region["text"],)
+                texts = ("".join(text.split()) for _, (text, _) in lines)
+                if not any(target in text if region.get("include") else text == target
+                           for text in texts for target in targets):
                     return False
         except Exception as error:
             self.logger.debug(f"识别{definition['name']}的界面文字失败：{error}")

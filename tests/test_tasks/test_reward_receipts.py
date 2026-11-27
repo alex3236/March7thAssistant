@@ -457,7 +457,7 @@ def test_pc_training_does_not_rescan_after_the_last_action_when_collection_is_di
 @pytest.mark.parametrize("case", ["milestone", "action_error", "next_action", "return_failed"])
 def test_pc_training_returns_to_guide_after_an_action_leaves_the_page(monkeypatch, case):
     config = SimpleNamespace(
-        daily_enable=True, daily_material_enable=True, daily_memory_one_enable=False, daily_himeko_try_enable=False,
+        daily_enable=True, daily_material_enable=True, daily_memory_one_enable=False,
         reward_enable=True, reward_quest_enable=True, save_timestamp=Mock(),
         notify_template={"DailyPracticeCompleted": "每日实训已完成"},
     )
@@ -551,7 +551,7 @@ def test_pc_training_recipe_checks_amount_without_reading_the_already_selected_t
 
 def test_redemption_keeps_confirmed_success_when_mail_fails(monkeypatch):
     auto = Mock(matched_text="兑换成功")
-    cfg = Mock(already_used_codes=[])
+    cfg = Mock(already_used_codes=[], control_backend="local")
     monkeypatch.setattr(redemption, "cfg", cfg)
     monkeypatch.setattr(redemption, "auto", auto)
     monkeypatch.setattr(redemption, "get_game_controller", Mock())

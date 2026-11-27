@@ -14,7 +14,7 @@ SCOPES = {key: item.key_scope(key) for item in SETTINGS for key in item.keys}
 _EXTRA = {
     Scope.STATE: "weekly_relic_cleanup_timestamp already_used_codes",
     Scope.PLAN: (
-        "calyx_golden_preference fuel_ticket_batch_enable daily_himeko_try_enable daily_tasks "
+        "calyx_golden_preference fuel_ticket_batch_enable daily_tasks "
         "divergent_team_type currencywars_remembrance_trailblazer_name"
     ),
     Scope.SECRET: "telemetry_secret",
@@ -137,6 +137,10 @@ class AccountLayer:
         self.verify_identity = None
         self.login_prompt_seen = False
         self.select_client_at_launch = False
+        self.switch_method = "snapshot"
+        # 在游戏登录框里切换：None 不处理，"logout" 要登出换号，"keep" 只在出现登录框时选回本账号，"done" 已核对。
+        self.login_switch = None
+        self.previous_uid = None
         self.renewed = False
         self.values = {}
 
