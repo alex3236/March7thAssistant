@@ -1,5 +1,6 @@
 """Android 入口脚本里不需要设备的部分：入口对照、设置校验、步骤和进度回报。"""
 import ast
+from functools import reduce
 import importlib
 import importlib.util
 import inspect
@@ -23,7 +24,9 @@ from module.config import cfg
 from module.game.adb import AdbGameController
 from module.game.adb_ready import wait_for_game as wait_for_game_frames
 from module.logger import log
+from tasks.daily.redemption import Redemption
 from tasks.touch import power, rewards
+from utils.color import green, red, yellow
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -35,16 +38,21 @@ WINDOWS_TARGETS = {
     "routine": "tasks.touch.rewards.routine",
     "power": "tasks.touch.power.run_standalone",
 }
-APP_TASKS = {"ROUTINE": "routine", "DAILY": "daily", "POWER": "power"}
-# 界面契约里设置对照表的 30 个键。
+# 兑换码沿用 Windows 的 main.py redemption 子任务。
+WINDOWS_REDEEM = "tasks.daily.redemption.Redemption.start"
+APP_TASKS = {"ROUTINE": "routine", "DAILY": "daily", "POWER": "power", "REDEEM": "redemption"}
+# 界面契约里设置对照表的 37 个键。
 SETTING_KEYS = {
     "power_enable", "power_plan", "power_plan_keep", "power_plan_continue", "instance_type", "instance_names",
-    "use_reserved_trailblaze_power", "use_fuel", "instance_team_enable", "instance_team_number", "instance_teams",
+    "use_reserved_trailblaze_power", "use_fuel", "build_target_enable", "build_target_scheme",
+    "build_target_ornament_weekly_count", "build_target_use_user_instance_when_only_erosion_and_ornament",
+    "instance_team_enable", "instance_team_number", "instance_teams",
     "borrow_enable", "borrow_character_enable", "borrow_friends", "borrow_scroll_times", "echo_of_war_enable",
     "echo_of_war_start_day_of_week", "tp_before_instance", "relic_bag_cleanup_enable",
     "instance_names_challenge_count", "auto_battle_detect_enable", "reward_enable", "reward_dispatch_enable",
     "reward_mail_enable", "reward_assist_enable", "reward_quest_enable", "reward_srpass_enable",
-    "reward_message_enable", "daily_enable", "daily_material_enable",
+    "reward_redemption_code_enable", "reward_message_enable", "redemption_code", "already_used_codes",
+    "daily_enable", "daily_material_enable",
 }
 
 
@@ -66,31 +74,45 @@ def main_touch_actions():
     raise AssertionError("main.py 里没有 touch_actions")
 
 
+def main_sub_task(action):
+    """读出 main.py 里 sub_tasks 对某个子任务的写法，例如 "Redemption.start"。"""
+    tree = ast.parse((ROOT / "main.py").read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(getattr(target, "id", None) == "sub_tasks" for target in node.targets):
+            for key, value in zip(node.value.keys, node.value.values):
+                if getattr(key, "value", None) == action:
+                    return ast.unparse(value)
+    raise AssertionError(f"main.py 的 sub_tasks 里没有 {action}")
+
+
 def payload(**changes):
     values = dict.fromkeys(SETTING_KEYS, False)
     values.update(changes)
     return json.dumps(values, ensure_ascii=False)
 
 
-def test_targets_are_the_windows_touch_entries(entry):
+def test_targets_are_the_windows_entries(entry):
     targets = {APP_TASKS[task]: ".".join(target) for task, target in entry.TASK_TARGETS.items()}
+    assert targets.pop("redemption") == WINDOWS_REDEEM
+    assert WINDOWS_REDEEM.endswith("." + main_sub_task("redemption"))
     assert targets == WINDOWS_TARGETS
     assert {task: path.removeprefix("tasks.touch.") for task, path in targets.items()} == main_touch_actions()
     for module_name, name in entry.TASK_TARGETS.values():
-        assert "on_summary" in inspect.signature(getattr(importlib.import_module(module_name), name)).parameters
+        target = reduce(getattr, name.split("."), importlib.import_module(module_name))
+        assert "on_summary" in inspect.signature(target).parameters
     assert "on_step" in inspect.signature(rewards.routine).parameters
 
 
 def test_single_steps_use_the_routine_step_names(entry):
+    from module.overview.plan import STEP_NAMES
+
     assert entry.SINGLE_STEPS.keys() == entry.TASK_TARGETS.keys() - {"ROUTINE"}
-    source = inspect.getsource(rewards.routine)
-    for name in entry.SINGLE_STEPS.values():
-        assert f'("{name}"' in source
+    assert set(entry.SINGLE_STEPS.values()) <= set(STEP_NAMES.values())
 
 
 def test_setting_keys_match_the_contract_and_exist_in_the_template(entry):
     assert entry.SETTING_KEYS == SETTING_KEYS
-    assert len(SETTING_KEYS) == 30
+    assert len(SETTING_KEYS) == 37
     template = YAML(typ="safe").load((ROOT / "assets" / "config" / "config.example.yaml").read_text(encoding="utf-8"))
     assert SETTING_KEYS <= template.keys()
     assert entry.FIXED_SETTINGS.keys() <= template.keys()
@@ -168,12 +190,12 @@ def test_task_log_keeps_the_reason_instead_of_the_generic_step_line(entry):
     handler = entry._TaskLog(bridge)
 
     handler.begin_step("日常领奖")
-    handler.emit(record(logging.ERROR, "邮件失败：未确认邮箱附件状态"))
+    handler.emit(record(logging.ERROR, f"邮件失败：{red('未确认邮箱附件状态')}"))
     handler.emit(record(logging.ERROR, "日常领奖未完成"))
     assert handler.last_error == "邮件失败：未确认邮箱附件状态"
     handler.begin_step("每日实训")
     assert handler.last_error is None
-    handler.emit(record(logging.INFO, "=== 开始 ===", section_title="开始触屏每日实训"))
+    handler.emit(record(logging.INFO, "=== 开始 ===", section_title=green("开始触屏每日实训")))
     assert handler.last_error is None
     assert bridge.calls[-1] == ("log", "INFO", "开始触屏每日实训")
 
@@ -1040,16 +1062,17 @@ def test_progress_is_reported_at_each_write_and_the_setter_is_restored(entry, de
         assert bridge.progress is None
         for key, value in (
             ("power_plan", remaining), ("last_run_timestamp", 1762900000.5), ("echo_of_war_timestamp", 1762900100),
+            ("already_used_codes", ["ABC123"]),
         ):
             cfg.set_value(key, value)
             assert bridge.progress[key] == value
-        assert bridge.calls.count(("progress",)) == 3
+        assert bridge.calls.count(("progress",)) == 4
         return True
 
     monkeypatch.setattr(power, "run_standalone", run)
 
     assert start(entry, "POWER", bridge, power_plan=[["拟造花萼（金）", "回忆之蕾", 1], *remaining]) == "success"
-    assert bridge.calls.count(("progress",)) == 4
+    assert bridge.calls.count(("progress",)) == 5
     assert cfg.set_value == original
     assert ("set_value" in vars(cfg)) == instance_override
 
@@ -1070,13 +1093,15 @@ def test_routine_reports_each_step_with_its_reason_and_returns_the_progress(entr
     monkeypatch.setattr(rewards, "routine", routine)
     bridge = Bridge()
 
-    assert start(entry, "ROUTINE", bridge, power_plan=[["拟造花萼（金）", "回忆之蕾", 1]]) == "task_failed"
+    assert start(entry, "ROUTINE", bridge, power_plan=[["拟造花萼（金）", "回忆之蕾", 1]], already_used_codes=["OLD1"]) == "task_failed"
     assert bridge.steps == [
         ("清体力", "started", None), ("清体力", "succeeded", "已完成 1 次挑战"),
         ("日常领奖", "started", None), ("日常领奖", "failed", "邮件失败：未确认邮箱附件状态"),
     ]
     assert bridge.summary is None
-    assert bridge.progress == {"power_plan": [], "last_run_timestamp": 1762900000.5, "echo_of_war_timestamp": 0}
+    assert bridge.progress == {
+        "power_plan": [], "last_run_timestamp": 1762900000.5, "echo_of_war_timestamp": 0, "already_used_codes": ["OLD1"],
+    }
     # 进度在清理之前交回，固定配置也已写入。
     assert bridge.calls.index(("progress",)) < bridge.calls.index(("cleaning",))
     assert device["control_backend"] == "adb" and device["power_enable"] is False
@@ -1086,6 +1111,8 @@ def test_routine_reports_each_step_with_its_reason_and_returns_the_progress(entr
     ("DAILY", (rewards, "run_daily_training"), True),
     ("POWER", (power, "run_standalone"), True),
     ("POWER", (power, "run_standalone"), False),
+    ("REDEEM", (Redemption, "start"), True),
+    ("REDEEM", (Redemption, "start"), False),
 ])
 def test_single_tasks_report_one_step_around_the_windows_entry(entry, device, monkeypatch, task, target, result):
     def run(*, on_summary):
@@ -1105,6 +1132,46 @@ def test_single_tasks_report_one_step_around_the_windows_entry(entry, device, mo
     assert bridge.summary == (detail if result else None)
 
 
+def test_redeem_uses_the_codes_from_the_app(entry, device, monkeypatch):
+    seen = []
+
+    def run(*, on_summary):
+        seen.append(cfg.redemption_code)
+        log.hr("准备使用兑换码", 0)
+        log.info(f"开始使用兑换码: {green('ABC123')} (1/2)")
+        log.info(f"当前界面: {green('主界面')}")
+        log.info(f"兑换码已被使用: {yellow('永远不会抛弃你')} (2/2)")
+        on_summary("兑换成功 1 个，兑换码已被使用 1 个")
+        return True
+
+    monkeypatch.setattr(Redemption, "start", run)
+    bridge = Bridge()
+
+    assert start(entry, "REDEEM", bridge, redemption_code=["ABC123", "永远不会抛弃你"]) == "success"
+    assert seen == [["ABC123", "永远不会抛弃你"]]
+    assert [call[2] for call in bridge.calls if call[:2] == ("log", "INFO")][-4:] == [
+        "准备使用兑换码", "开始使用兑换码: ABC123 (1/2)", "当前界面: 主界面",
+        "兑换码已被使用: 永远不会抛弃你 (2/2)",
+    ]
+    assert bridge.steps == [("兑换码", "started", None), ("兑换码", "succeeded", "兑换成功 1 个，兑换码已被使用 1 个")]
+
+
+def test_each_run_reads_the_build_target_again(entry, device, monkeypatch):
+    # App 进程会连续执行多轮，上一轮读到的培养目标不能留给单独运行的清体力。
+    from tasks.daily.buildtarget import BuildTarget
+
+    monkeypatch.setattr(BuildTarget, "_initialized", True)
+    monkeypatch.setattr(BuildTarget, "_target_instances", {"侵蚀隧洞": ["睿治之径"]})
+
+    def run(*, on_summary):
+        assert not BuildTarget._initialized
+        assert BuildTarget._target_instances == {}
+        return True
+
+    monkeypatch.setattr(power, "run_standalone", run)
+    assert start(entry, "POWER", Bridge()) == "success"
+
+
 def test_android_entry_exports_debug_and_traceback_and_restores_log_levels(entry, device, monkeypatch):
     from PIL import Image
     from module.game import adb_ready
@@ -1120,7 +1187,8 @@ def test_android_entry_exports_debug_and_traceback_and_restores_log_levels(entry
     def fail(*, on_summary):
         adb_ready._match(Image.new("RGB", (1280, 720)), "menu", None)
         OCR.log_results(SimpleNamespace(logger=log), [{"txt": "委托"}])
-        raise GameRecoveryError("委托失败后无法回到可操作界面")
+        log.debug(f"识别目标: {green('委托')}")
+        raise GameRecoveryError(red("委托失败后无法回到可操作界面"))
 
     monkeypatch.setattr(rewards, "run_daily_training", fail)
     bridge = Bridge()
@@ -1130,6 +1198,8 @@ def test_android_entry_exports_debug_and_traceback_and_restores_log_levels(entry
     assert len(diagnostics) == 1
     assert "ADB 启动模板 menu" in diagnostics[0] and "相似度=0.450 阈值=0.90" in diagnostics[0]
     assert "OCR识别结果: ['委托']" in diagnostics[0]
+    assert "识别目标: 委托" in diagnostics[0]
+    assert all("\033[" not in call[2] for call in bridge.calls if call[0] == "log")
     assert any(call[:2] == ("log", "ERROR") and "Traceback (most recent call last):" in call[2]
                for call in bridge.calls)
     assert log.logger.level == original_level

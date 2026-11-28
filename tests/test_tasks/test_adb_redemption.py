@@ -96,7 +96,7 @@ def install(monkeypatch, backend, outcomes, **options):
     monkeypatch.setattr(redemption, "screen", ui)
     monkeypatch.setattr(redemption, "get_game_controller", lambda: game)
     monkeypatch.setattr(redemption, "time", SimpleNamespace(sleep=lambda _: None))
-    monkeypatch.setattr(redemption.reward, "start_specific", mail)
+    monkeypatch.setattr("tasks.reward.start_specific", mail)
     monkeypatch.setattr("tasks.touch.rewards.claim_mail", mail)
     return config, ui, game, mail
 
@@ -112,6 +112,13 @@ def test_shared_batch_keeps_confirmed_outcomes_and_never_resubmits(monkeypatch, 
     mail.assert_called_once()
     if backend == "adb":
         assert ui.keys == []
+
+
+def test_batch_reports_how_many_codes_got_each_result(monkeypatch):
+    install(monkeypatch, "adb", ["兑换码已被使用", "兑换成功"])
+    summary = Mock()
+    assert redemption.Redemption.start(on_summary=summary)
+    summary.assert_called_once_with("兑换成功 1 个，兑换码已被使用 1 个")
 
 
 def test_adb_accepts_first_clipboard_prompt_without_pasting_twice(monkeypatch):
